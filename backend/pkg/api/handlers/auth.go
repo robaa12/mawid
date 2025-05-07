@@ -65,4 +65,5 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 			"error": "Failed to retrieve user profile"})
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"data": user})
 }
