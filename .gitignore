@@ -1,2 +1,4 @@
 .env
 *.out
+docker-compose.yaml
+Database-data/

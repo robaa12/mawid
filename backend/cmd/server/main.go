@@ -36,8 +36,6 @@ func main() {
 	authHandler := handlers.NewAuthHandler(authService)
 
 	router := gin.Default()
-	router.Use(gin.Logger())
-	router.Use(gin.Recovery())
 	// Setup routes
 	api.SetupRoutes(router, authHandler, cfg)
 

@@ -29,9 +29,9 @@ func LoadConfig() *Config {
 	return &Config{
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "postgres"),
-		DBName:     getEnv("DB_NAME", "mawid"),
+		DBUser:     getEnv("POSTGRES_USER", "postgres"),
+		DBPassword: getEnv("POSTGRES_PASSWORD", "password"),
+		DBName:     getEnv("POSTGRES_DB", "mawid"),
 		JWTSecret:  getEnv("JWT_SECRET", "your-secret-key"),
 		ServerPort: getEnv("SERVER_PORT", "8080"),
 		AdminEmail: getEnv("ADMIN_EMAIL", "admin@mawid.com"),
