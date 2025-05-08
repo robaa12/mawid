@@ -109,6 +109,44 @@ func (s *StorageService) UploadFile(file *multipart.FileHeader) (string, error) 
 	return publicURL, nil
 }
 
+func (s *StorageService) DeleteFile(fileURL string) error {
+	// Extract filename from URL
+	filename := s.ExtractFilenameFromURL(fileURL)
+	if filename == "" {
+		return errors.New("invalid file URL format")
+	}
+
+	// Create request URL
+	url := fmt.Sprintf("%s/storage/v1/object/%s/%s",
+		strings.TrimRight(s.Config.SupabaseURL, "/"),
+		s.Config.SupabaseBucket,
+		filename)
+
+	// Create request
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("error creating delete request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Authorization", "Bearer "+s.Config.SupabaseKey)
+
+	// Send request
+	resp, err := s.Client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error deleting from storage: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("storage service error (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
+}
+
 func (s *StorageService) IsValidFileType(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	return SupportedImageTypes[ext]
@@ -135,4 +173,18 @@ func (s *StorageService) GetContentType(filename string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+func (s *StorageService) ExtractFilenameFromURL(url string) string {
+	// If URL is empty, return empty string
+	if url == "" {
+		return ""
+	}
+
+	parts := strings.Split(url, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return parts[len(parts)-1]
 }
