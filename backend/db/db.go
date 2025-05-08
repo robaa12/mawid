@@ -26,5 +26,10 @@ func InitDB(cfg *config.Config) *gorm.DB {
 	}
 
 	log.Println("Connected to database successfully")
+
+	if err := RunMigrations(DB); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
+
 	return DB
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/robaa12/mawid/db"
 	"github.com/robaa12/mawid/pkg/api"
 	"github.com/robaa12/mawid/pkg/api/handlers"
-	"github.com/robaa12/mawid/pkg/models"
 	"github.com/robaa12/mawid/pkg/repository"
 	"github.com/robaa12/mawid/pkg/services"
 )
@@ -20,13 +19,8 @@ func main() {
 	// Initialize database
 	database := db.InitDB(cfg)
 
-	err := database.AutoMigrate(&models.User{})
-	if err != nil {
-		log.Fatalf("Failed to migrate database: %v", err)
-	}
-
 	userRepo := repository.NewUserRepository(database)
-	err = userRepo.CreateAdminIfNotExists(cfg.AdminEmail)
+	err := userRepo.CreateAdminIfNotExists(cfg.AdminEmail)
 	if err != nil {
 		log.Printf("Failed to create admin user: %v", err)
 	}
