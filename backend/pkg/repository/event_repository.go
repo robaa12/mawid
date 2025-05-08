@@ -71,6 +71,23 @@ func (r *EventRepository) SearchByName(name string, page, pageSize int) ([]model
 	return events, total, nil
 }
 
+func (r *EventRepository) GetCategoryByID(id uint) (*models.Category, error) {
+	var category models.Category
+	err := r.DB.First(&category, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &category, nil
+
+}
+
+func (r *EventRepository) GetAllCategories() ([]models.Category, error) {
+	var categories []models.Category
+	err := r.DB.Find(&categories).Error
+	return categories, err
+
+}
+
 func (r *EventRepository) CreateCategory(category *models.Category) error {
 	return r.DB.Create(category).Error
 }
