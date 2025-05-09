@@ -10,7 +10,7 @@ import (
 func RunMigrations(db *gorm.DB) error {
 	log.Println("Running database migrations... ")
 
-	err := db.AutoMigrate(&models.User{}, &models.Category{}, &models.Event{}, &models.EventTag{})
+	err := db.AutoMigrate(&models.User{}, &models.Category{}, &models.Event{}, &models.EventTag{}, &models.Tag{})
 	if err != nil {
 		log.Printf("Migration failed: %v", err)
 		return err
