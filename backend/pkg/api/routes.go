@@ -22,7 +22,7 @@ func SetupRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, eventHan
 		// Publich routes
 		events.GET("", eventHandler.GetEvents)
 		events.GET("/:id", eventHandler.GetEventByID)
-		events.GET("/:search", eventHandler.SearchEvents)
+		events.GET("/search", eventHandler.SearchEvents)
 		events.GET("/categories", eventHandler.GetCategories)
 
 		// Protected routes

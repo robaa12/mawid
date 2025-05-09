@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/robaa12/mawid/internal/utils"
@@ -22,8 +23,42 @@ func NewEventHandler(eventService *services.EventService) *EventHandler {
 func (h *EventHandler) CreateEvent(c *gin.Context) {
 	var input services.CreateEventInput
 
-	if err := c.ShouldBind(&input); err != nil {
-		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid input data", err.Error())
+	contentType := c.GetHeader("Content-Type")
+	if contentType != "" && strings.Contains(contentType, "multipart/form-data") {
+		if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+			utils.ErrorResponse(c, http.StatusBadRequest, "Failed to parse form data", err.Error())
+			return
+		}
+
+		input.Name = c.PostForm("name")
+		input.Description = c.PostForm("description")
+		categoryID, err := strconv.ParseUint(c.PostForm("category_id"), 10, 32)
+		if err == nil {
+			input.CategoryID = uint(categoryID)
+		}
+		input.EventDate = c.PostForm("event_date")
+		input.Venue = c.PostForm("venue")
+		price, err := strconv.ParseFloat(c.PostForm("price"), 64)
+		if err == nil {
+			input.Price = price
+		}
+
+		tagStr := c.PostForm("tags")
+		if tagStr != "" {
+			input.Tags = strings.Split(tagStr, ",")
+			for i, tag := range input.Tags {
+				input.Tags[i] = strings.TrimSpace(tag)
+			}
+		}
+	} else {
+		if err := c.ShouldBind(&input); err != nil {
+			utils.ErrorResponse(c, http.StatusBadRequest, "Invalid input data", err.Error())
+			return
+		}
+	}
+
+	if input.Name == "" || input.Description == "" || input.CategoryID == 0 || input.EventDate == "" || input.Venue == "" {
+		utils.ErrorResponse(c, http.StatusBadRequest, "Missing required fields", nil)
 		return
 	}
 
@@ -48,7 +83,11 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, "Event retrieved successfully", events)
+	if events.Total < 1 {
+		utils.SuccessResponse(c, http.StatusNotFound, "No events found", nil)
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Events retrived successfully", events)
 }
 
 func (h *EventHandler) GetEventByID(c *gin.Context) {
@@ -129,6 +168,11 @@ func (h *EventHandler) SearchEvents(c *gin.Context) {
 		return
 	}
 
+	if events.Total < 1 {
+		utils.ErrorResponse(c, http.StatusNotFound, "No events found matching your search", nil)
+		return
+	}
+
 	utils.SuccessResponse(c, http.StatusOK, "Search results", events)
 }
 
@@ -202,4 +246,3 @@ func (h *EventHandler) DeleteCategory(c *gin.Context) {
 
 	utils.SuccessResponse(c, http.StatusOK, "Category deleted successfully", nil)
 }
-

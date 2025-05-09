@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"strings"
 	"time"
@@ -281,12 +282,17 @@ func (s *EventService) normalizePagination(page, pageSize int) (int, int) {
 
 // createPaginatedResponse builds a paginated response
 func (s *EventService) createPaginatedResponse(events []models.Event, total int64, page, pageSize int) (*PaginatedEvents, error) {
-	var eventResponses []EventResponse
+	eventResponses := make([]EventResponse, 0)
+
 	for _, event := range events {
 		eventResponses = append(eventResponses, *s.mapEventToResponse(event))
 	}
 
-	totalPages := (int(total) + pageSize - 1) / pageSize
+	totalPages := 1
+	if total > 0 {
+		totalPages = (int(total) + pageSize - 1) / pageSize
+	}
+
 	return &PaginatedEvents{
 		Events:     eventResponses,
 		Total:      total,
@@ -303,6 +309,7 @@ func (s *EventService) processTags(event *models.Event, tagNames []string) error
 	}
 
 	var tags []models.Tag
+
 	for _, name := range tagNames {
 		if name = strings.TrimSpace(name); name == "" {
 			continue
@@ -315,7 +322,9 @@ func (s *EventService) processTags(event *models.Event, tagNames []string) error
 	}
 
 	if len(tags) > 0 {
-		s.EventRepo.DB.Model(event).Association("Tags").Append(tags)
+		if err := s.EventRepo.DB.Model(event).Association("Tags").Replace(tags); err != nil {
+			return fmt.Errorf("failed to associate tags with event: %w", err)
+		}
 	}
 	return nil
 }
