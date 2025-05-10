@@ -35,7 +35,6 @@ var (
 		".gif":  true,
 		".webp": true,
 	}
-	MaxFileSize int64 = 5 * 1024 * 1024
 )
 
 func NewStorageService(cfg *config.Config) *StorageService {
@@ -60,8 +59,8 @@ func (s *StorageService) UploadFile(file *multipart.FileHeader) (string, error) 
 		return "", errors.New("unsupported file type")
 	}
 
-	if file.Size > MaxFileSize {
-		return "", fmt.Errorf("file size exceeds maximum allowed (%d bytes)", MaxFileSize)
+	if file.Size > s.Config.MaxUploadSize {
+		return "", fmt.Errorf("file size exceeds maximum allowed (%d bytes)", s.Config.MaxUploadSize)
 	}
 
 	src, err := file.Open()
