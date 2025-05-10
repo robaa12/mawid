@@ -7,9 +7,10 @@ import (
 	"github.com/robaa12/mawid/pkg/api/middlewars"
 )
 
-func SetupRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, eventHandler *handlers.EventHandler, cfg *config.Config) {
+func SetupRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, eventHandler *handlers.EventHandler, bookingHandler *handlers.BookingHandler, cfg *config.Config) {
 	api := router.Group("/api/v1")
 
+	// Authentication routes
 	auth := api.Group("/auth")
 	{
 		auth.POST("/register", authHandler.Register)
@@ -17,6 +18,7 @@ func SetupRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, eventHan
 		auth.GET("/profile", middlewars.AuthMidddleware(cfg), authHandler.GetProfile)
 	}
 
+	// Event routes
 	events := api.Group("/events")
 	{
 		// Publich routes
@@ -38,5 +40,16 @@ func SetupRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, eventHan
 			adminEvents.PUT("/categories/:id", eventHandler.UpdateCategory)
 			adminEvents.DELETE("/categories/:id", eventHandler.DeleteCategory)
 		}
+	}
+
+	// Booking routes
+	bookings := api.Group("/bookings")
+	bookings.Use(middlewars.AuthMidddleware(cfg)) // All routes require authentication
+	{
+
+		bookings.POST("", bookingHandler.CreateBooking)
+		bookings.GET("", bookingHandler.GetUserBookings)
+		bookings.GET("/event/:eventId", bookingHandler.CheckEventBookings)
+		bookings.PUT("/:id/status", bookingHandler.UpdateBookingStatus)
 	}
 }

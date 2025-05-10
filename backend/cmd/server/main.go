@@ -23,21 +23,28 @@ func main() {
 	// TO DO : Refactore Packages Initialization
 	userRepo := repository.NewUserRepository(database)
 	eventRepo := repository.NewEventRepository(database)
+	bookingRepo := repository.NewBookingRepository(database)
 	err := userRepo.CreateAdminIfNotExists(cfg.AdminEmail)
 	if err != nil {
 		log.Printf("Failed to create admin user: %v", err)
 	}
 
+	// Define Auth components
 	authService := services.NewAuthService(userRepo, cfg)
 	authHandler := handlers.NewAuthHandler(authService)
 
+	// Define Event components
 	storageService := utils.NewStorageService(cfg)
 	eventService := services.NewEventService(eventRepo, storageService)
 	eventHandler := handlers.NewEventHandler(eventService)
 
+	// Define Bookings components
+	bookingService := services.NewBookingService(bookingRepo, eventRepo, userRepo)
+	bookingHandler := handlers.NewBookingHandler(bookingService)
+
 	router := gin.Default()
 	// Setup routes
-	api.SetupRoutes(router, authHandler, eventHandler, cfg)
+	api.SetupRoutes(router, authHandler, eventHandler, bookingHandler, cfg)
 
 	log.Printf("Server starting on port %s\n", cfg.ServerPort)
 	if err := router.Run(":" + cfg.ServerPort); err != nil {
