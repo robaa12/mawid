@@ -1,7 +1,11 @@
 // Updated api.js - Focus on interceptors
 import axios from "axios";
 
-const API_URL = "http://localhost:8080/api/v1";
+// Use environment variable with fallback
+const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8080/api/v1";
+
+// Log the API URL being used
+console.log("Using API URL:", API_URL);
 
 // Create an Axios instance with default config
 const api = axios.create({

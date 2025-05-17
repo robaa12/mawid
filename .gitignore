@@ -1,7 +1,24 @@
+# Mawid - Event Booking Platform
+
+# Environment and config files
 .env
+*.env.*
+!.env.example
+
+# Build artifacts and temporary files
 *.out
+*.log
+*.bak
+*.tmp
+*.temp
+
+# Docker
 docker-compose.yaml
 Database-data/
+
+# Backend
+/backend/tmp
+/backend/vendor
 
 # Frontend
 /frontend/node_modules
@@ -9,6 +26,9 @@ Database-data/
 /frontend/.pnp.js
 /frontend/coverage
 /frontend/build
+/frontend/dist
+/frontend/.next
+/frontend/out
 /frontend/.DS_Store
 /frontend/.env.local
 /frontend/.env.development.local
@@ -18,4 +38,18 @@ Database-data/
 /frontend/yarn-debug.log*
 /frontend/yarn-error.log*
 /frontend/.cache
-/frontend/dist
+/frontend/.parcel-cache
+/frontend/storybook-static
+/frontend/.vercel
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS specific
+Thumbs.db
+.directory

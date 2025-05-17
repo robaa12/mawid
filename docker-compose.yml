@@ -1,0 +1,49 @@
+version: "3"
+
+services:
+  # Commented out local database as I am using Neon cloud PostgreSQL
+  # database:
+  #   image: postgres:latest
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=password
+  #     - POSTGRES_DB=mawid
+  #   volumes:
+  #     - Database-data:/var/lib/postgresql/data
+  #   networks:
+  #     - mawid-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgresql://neondb_owner:npg_XEbTq4f5SJOY@ep-solitary-wind-a2nnj87d-pooler.eu-central-1.aws.neon.tech/mawid?sslmode=require
+      - JWT_SECRET=AbdelhamidRobaa
+      - SERVER_PORT=8080
+      - ADMIN_EMAIL=admin@mawid.com
+      - SUPABASE_URL=https://ybqcpxgqvwjdofkarzrg.supabase.co
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlicWNweGdxdndqZG9ma2FyenJnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NjY2OTc3MywiZXhwIjoyMDYyMjQ1NzczfQ.gNVhWl3Y6Xx0v6OWwjqFBj4SdEHEA3z40VIZTc1OebI
+      - SUPABASE_BUCKET=event-images
+      - SUPABASE_PUBLIC_URL=https://ybqcpxgqvwjdofkarzrg.supabase.co/storage/v1/object/public/event-images
+      - MAX_UPLOAD_SIZE=5242880
+    restart: unless-stopped
+    networks:
+      - mawid-network
+
+# Local volumes not needed when using cloud database
+# volumes:
+#   Database-data:
+
+networks:
+  mawid-network:
+    driver: bridge
