@@ -20,7 +20,8 @@ const Register = () => {
       .required('Email is required'),
     password: Yup.string()
       .required('Password is required')
-      .min(6, 'Password must be at least 6 characters'),
+      .min(8, 'Password must be at least 8 characters')
+      .matches(/^(?=.*[A-Za-z])(?=.*\d)/, 'Password must contain at least one letter and one number'),
     confirmPassword: Yup.string()
       .oneOf([Yup.ref('password'), null], 'Passwords must match')
       .required('Please confirm your password')
@@ -121,6 +122,9 @@ const Register = () => {
                       <Form.Control.Feedback type="invalid">
                         {errors.password}
                       </Form.Control.Feedback>
+                      <Form.Text className="text-muted">
+                        Password must be at least 8 characters long and contain both letters and numbers.
+                      </Form.Text>
                     </Form.Group>
                     
                     <Form.Group className="mb-3">
