@@ -1,0 +1,52 @@
+.footer {
+  margin-top: 2rem;
+  padding: 1.5rem 0;
+  background: #212529;
+  color: white;
+  width: 100%;
+}
+
+.footer-sticky {
+  position: sticky;
+  top: 100vh;
+}
+
+.page-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.content-wrap {
+  flex: 1;
+}
+
+.copyright {
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+}
+
+.tagline {
+  font-size: 0.875rem;
+  opacity: 0.8;
+  margin-bottom: 0;
+}
+
+.heart-icon {
+  color: #dc3545;
+  margin: 0 3px;
+}
+
+@media (max-width: 767.98px) {
+  .footer {
+    padding: 1.25rem 0;
+  }
+  
+  .copyright {
+    font-size: 0.9rem;
+  }
+  
+  .tagline {
+    font-size: 0.8rem;
+  }
+}

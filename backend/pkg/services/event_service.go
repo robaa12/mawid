@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/robaa12/mawid/internal/utils"
@@ -15,6 +17,9 @@ import (
 type EventService struct {
 	EventRepo      *repository.EventRepository
 	StorageService *utils.StorageService
+	BookingRepo    *repository.BookingRepository
+	cache          *utils.Cache
+	cacheMutex     sync.RWMutex
 }
 
 type (
@@ -61,11 +66,40 @@ type (
 	}
 )
 
-func NewEventService(eventRepo *repository.EventRepository, storageService *utils.StorageService) *EventService {
-	return &EventService{
+func NewEventService(eventRepo *repository.EventRepository, storageService *utils.StorageService, bookingRepo *repository.BookingRepository) *EventService {
+	fmt.Println("[CACHE INIT] Creating new event service with cache")
+	
+	service := &EventService{
 		EventRepo:      eventRepo,
 		StorageService: storageService,
+		BookingRepo:    bookingRepo,
+		cache:          utils.NewCache(),
 	}
+	
+	go func() {
+		fmt.Println("[CACHE INIT] Populating recent events cache on startup")
+		
+		if _, err := service.cacheRecentEvents(); err != nil {
+			fmt.Println("[CACHE INIT ERROR] Failed to initialize cache:", err)
+		}
+		
+		ticker := time.NewTicker(2 * time.Minute)
+		go func() {
+			for range ticker.C {
+				fmt.Println("[CACHE AUTO-REFRESH] Performing scheduled cache refresh")
+				
+				service.cacheMutex.Lock()
+				service.cache.Delete("recent_events")
+				service.cacheMutex.Unlock()
+				
+				if _, err := service.cacheRecentEvents(); err != nil {
+					fmt.Println("[CACHE AUTO-REFRESH ERROR] Failed to refresh cache:", err)
+				}
+			}
+		}()
+	}()
+	
+	return service
 }
 
 func (s *EventService) CreateEvent(input CreateEventInput, image *multipart.FileHeader) (*EventResponse, error) {
@@ -78,49 +112,51 @@ func (s *EventService) CreateEvent(input CreateEventInput, image *multipart.File
 		return nil, errors.New("category not found")
 	}
 
-	event := models.Event{
+	newEvent := models.Event{
 		Name:        input.Name,
 		Description: input.Description,
-		CategoryID:  input.CategoryID,
+		CategoryID:  input.CategoryID, 
 		EventDate:   eventDate,
 		Venue:       input.Venue,
 		Price:       input.Price,
 	}
 
 	if image != nil {
-		imageURL, err := s.StorageService.UploadFile(image)
+		imgURL, err := s.StorageService.UploadFile(image)
 		if err != nil {
 			return nil, err
 		}
-		event.ImageURL = imageURL
+		newEvent.ImageURL = imgURL
 	}
 
-	if err := s.EventRepo.Create(&event); err != nil {
-		// Delete uploaded image if event creation fails
-		if event.ImageURL != "" {
-			_ = s.StorageService.DeleteFile(event.ImageURL)
+	if err := s.EventRepo.Create(&newEvent); err != nil {
+		if newEvent.ImageURL != "" {
+			_ = s.StorageService.DeleteFile(newEvent.ImageURL)
 		}
 		return nil, err
 	}
 
-	if err := s.processTags(&event, input.Tags); err != nil {
+	go func() {
+		fmt.Println("[CACHE TRIGGER] New event created, refreshing cache")
+		s.cacheRecentEvents()
+	}()
+
+	if err := s.processTags(&newEvent, input.Tags); err != nil {
 		return nil, err
 	}
 
-	// Get the complete event with relations
-	createdEvent, err := s.EventRepo.GetEventByID(event.ID)
+	completeEvent, err := s.EventRepo.GetEventByID(newEvent.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.mapEventToResponse(*createdEvent), nil
+	return s.mapEventToResponse(*completeEvent), nil
 }
 
-// GetAllEvents returns paginated events
-func (s *EventService) GetAllEvents(page, pageSize int) (*PaginatedEvents, error) {
+func (s *EventService) GetAllEvents(page, pageSize int, categoryID uint) (*PaginatedEvents, error) {
 	page, pageSize = s.normalizePagination(page, pageSize)
 
-	events, total, err := s.EventRepo.GetAll(page, pageSize)
+	events, total, err := s.EventRepo.GetAll(page, pageSize, categoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -128,89 +164,89 @@ func (s *EventService) GetAllEvents(page, pageSize int) (*PaginatedEvents, error
 	return s.createPaginatedResponse(events, total, page, pageSize)
 }
 
-// GetEventByID retrieves an event by its ID
 func (s *EventService) GetEventByID(id uint) (*EventResponse, error) {
-	event, err := s.EventRepo.GetEventByID(id)
+	cacheKey := fmt.Sprintf("event_%d", id)
+	
+	s.cacheMutex.RLock()
+	cachedData, found := s.cache.Get(cacheKey)
+	s.cacheMutex.RUnlock()
+	
+	if found {
+		if eventData, ok := cachedData.(*EventResponse); ok {
+			return eventData, nil
+		}
+	}
+	
+	eventData, err := s.EventRepo.GetEventByID(id)
 	if err != nil {
 		return nil, err
 	}
-	return s.mapEventToResponse(*event), nil
+	
+	result := s.mapEventToResponse(*eventData)
+	
+	s.cacheMutex.Lock()
+	s.cache.Set(cacheKey, result, 5*time.Minute)
+	s.cacheMutex.Unlock()
+	
+	return result, nil
 }
 
-// UpdateEvent updates an existing event
 func (s *EventService) UpdateEvent(id uint, input UpdateEventInput, image *multipart.FileHeader) (*EventResponse, error) {
-	// Retrieve existing event
-	event, err := s.EventRepo.GetEventByID(id)
+	existingEvent, err := s.EventRepo.GetEventByID(id)
 	if err != nil {
 		return nil, errors.New("event not found")
 	}
 
-	// Update basic fields if provided
-	s.updateEventFields(event, input)
+	s.updateEventFields(existingEvent, input)
 
-	// Handle image update
 	if image != nil {
-		// Store old image URL to delete after successful update
-		oldImageURL := event.ImageURL
+		oldImg := existingEvent.ImageURL
 
-		// Upload new image
-		imageURL, err := s.StorageService.UploadFile(image)
+		newImgURL, err := s.StorageService.UploadFile(image)
 		if err != nil {
 			return nil, err
 		}
-		event.ImageURL = imageURL
+		existingEvent.ImageURL = newImgURL
 
-		// Delete old image after successful database update
 		defer func() {
-			if err == nil && oldImageURL != "" {
-				_ = s.StorageService.DeleteFile(oldImageURL)
+			if err == nil && oldImg != "" {
+				_ = s.StorageService.DeleteFile(oldImg)
 			}
 		}()
 	}
 
-	// Update event in database
-	if err := s.EventRepo.Update(event); err != nil {
+	if err := s.EventRepo.Update(existingEvent); err != nil {
 		return nil, err
 	}
 
-	// Process tags if provided
 	if input.Tags != nil {
-		if err := s.updateEventTags(event, input.Tags); err != nil {
+		if err := s.updateEventTags(existingEvent, input.Tags); err != nil {
 			return nil, err
 		}
 	}
 
-	// Get the updated event with relations
-	updatedEvent, err := s.EventRepo.GetEventByID(id)
+	freshEvent, err := s.EventRepo.GetEventByID(id)
 	if err != nil {
 		return nil, err
 	}
+	
+	eventResp := s.mapEventToResponse(*freshEvent)
+	
+	cacheKey := fmt.Sprintf("event_%d", id)
+	s.cacheMutex.Lock()
+	s.cache.Delete(cacheKey)
+	s.cache.Set(cacheKey, eventResp, 5*time.Minute)
+	s.cache.Delete("recent_events")
+	s.cacheMutex.Unlock()
+	
+	go func() {
+		fmt.Println("[CACHE TRIGGER] Event updated, refreshing cache")
+		s.cacheRecentEvents()
+	}()
 
-	return s.mapEventToResponse(*updatedEvent), nil
+	return eventResp, nil
 }
 
-// DeleteEvent removes an event and its associated image
-func (s *EventService) DeleteEvent(id uint) error {
-	// Retrieve the event to get its image URL
-	event, err := s.EventRepo.GetEventByID(id)
-	if err != nil {
-		return err
-	}
-
-	// Delete from database
-	if err := s.EventRepo.Delete(id); err != nil {
-		return err
-	}
-
-	// Delete associated image if exists
-	if event.ImageURL != "" {
-		_ = s.StorageService.DeleteFile(event.ImageURL)
-	}
-
-	return nil
-}
-
-// SearchEvents searches for events by name
 func (s *EventService) SearchEvents(query string, page, pageSize int) (*PaginatedEvents, error) {
 	page, pageSize = s.normalizePagination(page, pageSize)
 
@@ -222,19 +258,33 @@ func (s *EventService) SearchEvents(query string, page, pageSize int) (*Paginate
 	return s.createPaginatedResponse(events, total, page, pageSize)
 }
 
-// Category-related methods
-
-// GetAllCategories returns all event categories
 func (s *EventService) GetAllCategories() ([]models.Category, error) {
-	return s.EventRepo.GetAllCategories()
+	s.cacheMutex.RLock()
+	cachedCategories, found := s.cache.Get("all_categories")
+	s.cacheMutex.RUnlock()
+	
+	if found {
+		if categories, ok := cachedCategories.([]models.Category); ok {
+			return categories, nil
+		}
+	}
+	
+	categories, err := s.EventRepo.GetAllCategories()
+	if err != nil {
+		return nil, err
+	}
+	
+	s.cacheMutex.Lock()
+	s.cache.Set("all_categories", categories, 15*time.Minute)
+	s.cacheMutex.Unlock()
+	
+	return categories, nil
 }
 
-// GetCategoryByID retrieves a category by its ID
 func (s *EventService) GetCategoryByID(id uint) (*models.Category, error) {
 	return s.EventRepo.GetCategoryByID(id)
 }
 
-// CreateCategory creates a new event category
 func (s *EventService) CreateCategory(name string) (*models.Category, error) {
 	category := models.Category{Name: name}
 	if err := s.EventRepo.CreateCategory(&category); err != nil {
@@ -243,7 +293,6 @@ func (s *EventService) CreateCategory(name string) (*models.Category, error) {
 	return &category, nil
 }
 
-// UpdateCategory updates an existing category
 func (s *EventService) UpdateCategory(id uint, name string) (*models.Category, error) {
 	category, err := s.EventRepo.GetCategoryByID(id)
 	if err != nil {
@@ -256,33 +305,49 @@ func (s *EventService) UpdateCategory(id uint, name string) (*models.Category, e
 	return category, nil
 }
 
-// DeleteCategory removes a category if not used by any event
 func (s *EventService) DeleteCategory(id uint) error {
-	// TODO: Add check to prevent deletion of categories in use
+	cat, err := s.EventRepo.GetCategoryByID(id)
+	if err != nil {
+		return fmt.Errorf("category not found: %w", err)
+	}
+
+	eventsToDelete, _, err := s.EventRepo.GetAll(1, 1000, id)
+	if err != nil {
+		return fmt.Errorf("failed to fetch events for category: %w", err)
+	}
+
+	fmt.Printf("Deleting category %s (ID: %d) with %d associated events\n", 
+		cat.Name, cat.ID, len(eventsToDelete))
+
+	for _, evt := range eventsToDelete {
+		if err := s.DeleteEvent(evt.ID); err != nil {
+			return fmt.Errorf("failed to delete event %d: %w", evt.ID, err)
+		}
+	}
+
 	return s.EventRepo.DeleteCategory(id)
 }
 
-// Helper Methods
-
-// parseEventDate parses date string to time.Time
 func (s *EventService) parseEventDate(dateStr string) (time.Time, error) {
 	return time.Parse("2006-01-02T15:04:05Z", dateStr)
 }
 
-// normalizePagination ensures valid pagination parameters
 func (s *EventService) normalizePagination(page, pageSize int) (int, int) {
 	if page < 1 {
 		page = 1
 	}
-	if pageSize < 1 || pageSize > 100 {
+
+	switch {
+	case pageSize < 1:
 		pageSize = 10
+	case pageSize > 100:
+		pageSize = 100
 	}
 	return page, pageSize
 }
 
-// createPaginatedResponse builds a paginated response
 func (s *EventService) createPaginatedResponse(events []models.Event, total int64, page, pageSize int) (*PaginatedEvents, error) {
-	eventResponses := make([]EventResponse, 0)
+	eventResponses := make([]EventResponse, 0, len(events))
 
 	for _, event := range events {
 		eventResponses = append(eventResponses, *s.mapEventToResponse(event))
@@ -296,51 +361,48 @@ func (s *EventService) createPaginatedResponse(events []models.Event, total int6
 	return &PaginatedEvents{
 		Events:     eventResponses,
 		Total:      total,
-		Page:       page,
+		Page:       page, 
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	}, nil
 }
 
-// processTags associates tags with an event
 func (s *EventService) processTags(event *models.Event, tagNames []string) error {
 	if len(tagNames) == 0 {
 		return nil
 	}
 
-	var tags []models.Tag
+	var tagsToAdd []models.Tag
 
 	for _, name := range tagNames {
-		if name = strings.TrimSpace(name); name == "" {
+		name = strings.TrimSpace(name)
+		if name == "" {
 			continue
 		}
+		
 		tag, err := s.EventRepo.FindOrCreateTag(name)
 		if err != nil {
 			continue
 		}
-		tags = append(tags, *tag)
+		tagsToAdd = append(tagsToAdd, *tag)
 	}
 
-	if len(tags) > 0 {
-		if err := s.EventRepo.DB.Model(event).Association("Tags").Replace(tags); err != nil {
+	if len(tagsToAdd) > 0 {
+		if err := s.EventRepo.DB.Model(event).Association("Tags").Replace(tagsToAdd); err != nil {
 			return fmt.Errorf("failed to associate tags with event: %w", err)
 		}
 	}
 	return nil
 }
 
-// updateEventTags replaces existing tags with new ones
 func (s *EventService) updateEventTags(event *models.Event, tagNames []string) error {
-	// Clear existing tags
 	if err := s.EventRepo.DB.Model(event).Association("Tags").Clear(); err != nil {
 		return err
 	}
 
-	// Add new tags
 	return s.processTags(event, tagNames)
 }
 
-// updateEventFields updates fields of an event if new values are provided
 func (s *EventService) updateEventFields(event *models.Event, input UpdateEventInput) error {
 	if input.Name != "" {
 		event.Name = input.Name
@@ -358,8 +420,9 @@ func (s *EventService) updateEventFields(event *models.Event, input UpdateEventI
 	}
 
 	if input.EventDate != "" {
-		if date, err := s.parseEventDate(input.EventDate); err == nil {
-			event.EventDate = date
+		parsedDate, err := s.parseEventDate(input.EventDate)
+		if err == nil {
+			event.EventDate = parsedDate
 		} else {
 			return errors.New("invalid date format")
 		}
@@ -376,8 +439,13 @@ func (s *EventService) updateEventFields(event *models.Event, input UpdateEventI
 	return nil
 }
 
-// mapEventToResponse converts a model to a response DTO
 func (s *EventService) mapEventToResponse(event models.Event) *EventResponse {
+	var tags []models.Tag
+	if len(event.Tags) > 0 {
+		tags = make([]models.Tag, len(event.Tags))
+		copy(tags, event.Tags)
+	}
+	
 	return &EventResponse{
 		ID:          event.ID,
 		Name:        event.Name,
@@ -387,8 +455,96 @@ func (s *EventService) mapEventToResponse(event models.Event) *EventResponse {
 		Venue:       event.Venue,
 		Price:       event.Price,
 		ImageURL:    event.ImageURL,
-		Tags:        event.Tags,
+		Tags:        tags,
 		CreatedAt:   event.CreatedAt,
 		UpdatedAt:   event.UpdatedAt,
 	}
+}
+
+func (s *EventService) DeleteEvent(id uint) error {
+	evt, err := s.EventRepo.GetEventByID(id)
+	if err != nil {
+		return err
+	}
+
+	if err := s.BookingRepo.DeleteBookingsByEvent(id); err != nil {
+		return fmt.Errorf("failed to delete associated bookings: %w", err)
+	}
+	
+	if evt.ImageURL != "" {
+		_ = s.StorageService.DeleteFile(evt.ImageURL)
+	}
+
+	err = s.EventRepo.Delete(id)
+	
+	if err == nil {
+		s.cacheMutex.Lock()
+		s.cache.Delete(fmt.Sprintf("event_%d", id))
+		s.cache.Delete("recent_events")
+		s.cacheMutex.Unlock()
+		
+		go func() {
+			fmt.Println("[CACHE TRIGGER] Event deleted, refreshing cache")
+			s.cacheRecentEvents()
+		}()
+	}
+	
+	return err
+}
+
+func (s *EventService) GetRecentEvents() (*PaginatedEvents, error) {
+	s.cacheMutex.RLock()
+	cachedStuff, found := s.cache.Get("recent_events")
+	s.cacheMutex.RUnlock()
+	
+	shouldForceRefresh := found && 
+		(len(os.Getenv("FORCE_CACHE_REFRESH")) > 0 || len(os.Getenv("DEBUG")) > 0)
+	
+	if found && !shouldForceRefresh {
+		if events, ok := cachedStuff.(*PaginatedEvents); ok {
+			fmt.Println("[CACHE HIT] Serving recent events from cache")
+			return events, nil
+		}
+	}
+	
+	if !found {
+		fmt.Println("[CACHE MISS] Recent events not found in cache, refreshing...")
+	} else {
+		fmt.Println("[CACHE REFRESH] Forcing cache refresh")
+	}
+	
+	return s.cacheRecentEvents()
+}
+
+func (s *EventService) cacheRecentEvents() (*PaginatedEvents, error) {
+	fmt.Println("[CACHE UPDATE] Starting recent events cache refresh")
+	
+	s.cacheMutex.Lock()
+	defer s.cacheMutex.Unlock()
+
+	evts, _, err := s.EventRepo.GetAll(1, 8, 0)
+	if err != nil {
+		fmt.Println("[CACHE ERROR] Failed to fetch events for cache:", err)
+		return nil, err
+	}
+
+	fmt.Println("[CACHE REFRESH] Getting fresh events from database")
+	
+	var topEvents []models.Event
+	
+	if len(evts) > 5 {
+		topEvents = evts[:5]
+	} else {
+		topEvents = evts
+	}
+
+	result, err := s.createPaginatedResponse(topEvents, int64(len(topEvents)), 1, 5)
+	if err != nil {
+		return nil, err
+	}
+
+	s.cache.Set("recent_events", result, 5*time.Minute)
+
+	fmt.Printf("[CACHE UPDATED] Cached %d recent events for 5 minutes (sorted by date with upcoming events first)\n", len(result.Events))
+	return result, nil
 }

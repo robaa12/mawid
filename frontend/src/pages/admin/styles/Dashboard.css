@@ -1,0 +1,44 @@
+/* Dashboard cards styling */
+.hover-card {
+  transition: all 0.3s ease;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.125);
+}
+
+.hover-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1) !important;
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.hover-card .card-body i {
+  transition: all 0.3s ease;
+}
+
+.hover-card:hover .card-body i {
+  transform: scale(1.1);
+}
+
+.hover-card .card-footer {
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
+}
+
+.hover-card:hover .card-footer {
+  opacity: 1;
+}
+
+/* Dashboard alert styling */
+.alert-light {
+  border-left: 4px solid #0d6efd;
+  background-color: rgba(13, 110, 253, 0.05);
+}
+
+/* System status indicators */
+.list-group-item .badge {
+  transition: all 0.3s ease;
+}
+
+.list-group-item:hover .badge {
+  transform: scale(1.1);
+}

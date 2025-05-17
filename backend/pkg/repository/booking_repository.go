@@ -96,3 +96,29 @@ func (r *BookingRepository) UpdateStatus(id uint, status models.BookingStatus) e
 func (r *BookingRepository) Delete(id uint) error {
 	return r.DB.Delete(&models.Booking{}, id).Error
 }
+
+func (r *BookingRepository) DeleteBookingsByEvent(id uint) error {
+	result := r.DB.Where("event_id = ?", id).Delete(&models.Booking{})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	return nil
+}
+
+func (r *BookingRepository) GetAllBookings(page, pageSize int) ([]models.Booking, error) {
+	var bookings []models.Booking
+
+	offset := (page - 1) * pageSize
+	query := r.DB.
+		Offset(offset).
+		Limit(pageSize).
+		Order("created_at DESC")
+
+	if err := query.Find(&bookings).Error; err != nil {
+		return nil, err
+	}
+
+	return bookings, nil
+}

@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/robaa12/mawid/pkg/models"
 	"gorm.io/gorm"
 )
@@ -17,16 +19,43 @@ func (r *EventRepository) Create(event *models.Event) error {
 	return r.DB.Create(event).Error
 }
 
-func (r *EventRepository) GetAll(page, pageSize int) ([]models.Event, int64, error) {
+func (r *EventRepository) GetAll(page, pageSize int, categoryID uint) ([]models.Event, int64, error) {
 	var events []models.Event
 	var total int64
-
-	if err := r.DB.Model(&models.Event{}).Count(&total).Error; err != nil {
+	
+	// Create base query
+	query := r.DB.Model(&models.Event{})
+	
+	// Apply category filter if provided
+	if categoryID > 0 {
+		query = query.Where("category_id = ?", categoryID)
+	}
+	
+	// Count total matching records
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-
+	
+	// Apply pagination and fetch records
 	offset := (page - 1) * pageSize
-	query := r.DB.Preload("Category").Preload("Tags").Offset(offset).Limit(pageSize)
+	query = r.DB.Preload("Category").Preload("Tags")
+	
+	// Apply category filter again for the actual data query
+	if categoryID > 0 {
+		query = query.Where("category_id = ?", categoryID)
+	}
+	
+	// Get current time for sorting logic
+	currentTime := time.Now()
+	
+	// Sort by upcoming events first, then by date
+	// First separate upcoming from past events, then sort by date
+	now := currentTime.Format("2006-01-02 15:04:05")
+	query = query.Order("CASE WHEN event_date >= '" + now + "' THEN 0 ELSE 1 END")
+	query = query.Order("CASE WHEN event_date >= '" + now + "' THEN event_date END ASC, " + 
+		"CASE WHEN event_date < '" + now + "' THEN event_date END DESC")
+	
+	query = query.Offset(offset).Limit(pageSize)
 	if err := query.Find(&events).Error; err != nil {
 		return nil, 0, err
 	}
@@ -62,9 +91,18 @@ func (r *EventRepository) SearchByName(name string, page, pageSize int) ([]model
 		return nil, 0, err
 	}
 
-	// Get paginated results
+	// Get current time for sorting logic
+	currentTime := time.Now()
+	
+	// Get paginated results with date-based sorting
 	offset := (page - 1) * pageSize
-	if err := query.Preload("Category").Preload("Tags").Offset(offset).Limit(pageSize).Find(&events).Error; err != nil {
+	queryBuilder := query.Preload("Category").Preload("Tags")
+	now := currentTime.Format("2006-01-02 15:04:05")
+	queryBuilder = queryBuilder.Order("CASE WHEN event_date >= '" + now + "' THEN 0 ELSE 1 END")
+	queryBuilder = queryBuilder.Order("CASE WHEN event_date >= '" + now + "' THEN event_date END ASC, " + 
+		"CASE WHEN event_date < '" + now + "' THEN event_date END DESC")
+	
+	if err := queryBuilder.Offset(offset).Limit(pageSize).Find(&events).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -124,4 +162,10 @@ func (r *EventRepository) FindOrCreateTag(name string) (*models.Tag, error) {
 
 	err := r.DB.Where("name = ?", name).FirstOrCreate(&tag, models.Tag{Name: name}).Error
 	return &tag, err
+}
+
+func (r *EventRepository) HasBookings(eventID uint) (bool, error) {
+	var count int64
+	err := r.DB.Model(&models.Booking{}).Where("event_id = ?", eventID).Count(&count).Error
+	return count > 0, err
 }

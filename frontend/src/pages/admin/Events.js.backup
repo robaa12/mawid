@@ -1,0 +1,1058 @@
+import React, { useState, useEffect } from "react";
+import {
+  Container,
+  Row,
+  Col,
+  Card,
+  Table,
+  Button,
+  Modal,
+  Form,
+  Alert,
+  Badge,
+  InputGroup
+} from "react-bootstrap";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Formik } from "formik";
+import * as Yup from "yup";
+import eventService from "../../services/eventService";
+import bookingService from "../../services/bookingService";
+import LoadingSpinner from "../../components/shared/LoadingSpinner";
+import Pagination from "../../components/shared/Pagination";
+
+const AdminEvents = () => {
+  const [events, setEvents] = useState([]);
+  const [allEvents, setAllEvents] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [eventToDelete, setEventToDelete] = useState(null);
+  const [filterActive, setFilterActive] = useState(true);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [eventBookings, setEventBookings] = useState([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [showBookingsModal, setShowBookingsModal] = useState(false);
+  
+  const navigate = useNavigate();
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+
+  // Get query params
+  const newEvent = searchParams.get("new") === "true";
+  const editEventId = searchParams.get("edit");
+
+  useEffect(() => {
+    fetchEvents(currentPage);
+    fetchCategories();
+
+    // Check if we should open modal for new event
+    if (newEvent) {
+      handleAddEvent();
+    }
+
+    // Check if we should open edit modal
+    if (editEventId) {
+      fetchEventForEditing(Number(editEventId));
+    }
+  }, [currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchEvents = async (page) => {
+    setLoading(true);
+    try {
+      const response = await eventService.getAllEvents(page);
+      
+      // Add isActive flag to each event
+      const eventsWithActiveFlag = response.data.events.map(event => {
+        const eventDate = new Date(event.event_date);
+        const currentDate = new Date();
+        return {
+          ...event,
+          isActive: eventDate >= currentDate
+        };
+      });
+      
+      // Sort events by name in ascending order
+      const sortedEvents = [...eventsWithActiveFlag].sort((a, b) => 
+        a.name.localeCompare(b.name)
+      );
+      
+      // Store all events
+      setAllEvents(sortedEvents);
+      
+      // Filter events based on active filter
+      if (filterActive) {
+        const activeEvents = sortedEvents.filter(event => event.isActive);
+        setEvents(activeEvents);
+        console.log("Active events:", activeEvents.length);
+      } else {
+        setEvents(sortedEvents);
+        console.log("All events:", sortedEvents.length);
+      }
+      
+      setTotalPages(response.data.total_pages);
+    } catch (err) {
+      console.error("Failed to fetch events:", err);
+      setError("Failed to load events. Please try again later.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const response = await eventService.getCategories();
+      console.log("Categories response:", response); // Debug the response
+      
+      // Handle different possible response structures
+      let categoriesData = [];
+
+      if (response && response.data) {
+        if (Array.isArray(response.data)) {
+          // If response.data is already an array
+          categoriesData = response.data;
+        } else if (response.data.data && Array.isArray(response.data.data)) {
+          // If response has format { success: true, message: "", data: [...] }
+          categoriesData = response.data.data;
+        } else if (
+          response.data.categories &&
+          Array.isArray(response.data.categories)
+        ) {
+          // If response has format { categories: [...] }
+          categoriesData = response.data.categories;
+        }
+      }
+
+      // Ensure we're setting an array
+      setCategories(Array.isArray(categoriesData) ? categoriesData : []);
+    } catch (err) {
+      console.error("Failed to fetch categories:", err);
+      setCategories([]); // Always initialize as empty array on error
+    }
+  };
+
+  const fetchEventForEditing = async (eventId) => {
+    try {
+      const response = await eventService.getEventById(eventId);
+      console.log("Fetched event for editing:", response.data);
+      setEditingEvent(response.data);
+      setShowEventModal(true);
+    } catch (err) {
+      console.error("Failed to fetch event details:", err);
+      setError("Failed to fetch event details for editing.");
+    }
+  };
+
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    window.scrollTo(0, 0);
+  };
+
+  const handleAddEvent = () => {
+    setEditingEvent(null);
+    setSelectedFile(null);
+    setShowEventModal(true);
+    // Clear the 'new' query parameter
+    navigate("/admin/events");
+  };
+
+  const handleEditEvent = (event) => {
+    setEditingEvent(event);
+    setSelectedFile(null);
+    setShowEventModal(true);
+    // Clear the 'edit' query parameter
+    navigate("/admin/events");
+  };
+
+  const handleCloseEventModal = () => {
+    setShowEventModal(false);
+    setEditingEvent(null);
+    setSelectedFile(null);
+  };
+
+  const handleDeleteClick = (event) => {
+    setEventToDelete(event);
+    setShowDeleteModal(true);
+  };
+  
+  const handleViewBookings = async (event) => {
+    console.log("Viewing bookings for event:", event);
+    setSelectedEvent(event);
+    setBookingsLoading(true);
+    setShowBookingsModal(true);
+    setError(""); // Clear any previous errors
+    
+    try {
+      // Get bookings for this event using the bookingService
+      console.log("Fetching bookings for event ID:", event.id);
+      const result = await bookingService.getEventBookings(event.id);
+      console.log("Event bookings result:", result);
+      console.log("Number of bookings found:", result.bookings.length);
+      
+      // Set the filtered bookings in state
+      setEventBookings(result.bookings);
+    } catch (err) {
+      console.error(`Failed to fetch bookings for event ${event.id}:`, err);
+      console.error("Error details:", err.response?.data || err.message);
+      setError(`Failed to load bookings for this event. ${err.response?.data?.message || err.message}`);
+    } finally {
+      setBookingsLoading(false);
+    }
+  };
+  
+  const handleUpdateBookingStatus = async (bookingId, newStatus) => {
+    try {
+      await bookingService.updateBookingStatus(bookingId, newStatus);
+      
+      // Update local state to reflect the change
+      setEventBookings(eventBookings.map(booking => 
+        booking.id === bookingId ? { ...booking, status: newStatus } : booking
+      ));
+      
+      setSuccessMessage(`Booking #${bookingId} has been ${newStatus}.`);
+      
+      // Auto-dismiss success message after 3 seconds
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 3000);
+    } catch (err) {
+      console.error(`Failed to update booking status:`, err);
+      setError(`Failed to update booking status. ${err.response?.data?.message || err.message}`);
+      
+      // Auto-dismiss error message after 5 seconds
+      setTimeout(() => {
+        setError("");
+      }, 5000);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!eventToDelete) return;
+
+    try {
+      await eventService.deleteEvent(eventToDelete.id);
+      setEvents(events.filter((e) => e.id !== eventToDelete.id));
+      setSuccessMessage(`Event "${eventToDelete.name}" has been deleted.`);
+    } catch (err) {
+      setError(
+        `Failed to delete event: ${err.response?.data?.message || err.message}`,
+      );
+    } finally {
+      setShowDeleteModal(false);
+      setEventToDelete(null);
+    }
+  };
+
+  const handleFileChange = (e, setFieldValue) => {
+    const file = e.target.files[0];
+    setSelectedFile(file);
+    setFieldValue("image", file);
+  };
+
+  // Form validation schema
+  const validationSchema = Yup.object({
+    name: Yup.string().required("Event name is required"),
+    description: Yup.string().required("Description is required"),
+    category_id: Yup.number().required("Category is required"),
+    event_date: Yup.string().required("Event date is required"),
+    venue: Yup.string().required("Venue is required"),
+    price: Yup.number()
+      .min(0, "Price cannot be negative")
+      .required("Price is required"),
+  });
+
+  // Updated Events.js - Focus on the handleSubmit function
+  const handleSubmit = async (values, { setSubmitting }) => {
+    try {
+      console.log("Form values submitted:", values);
+
+      // Format the event_date to ISO format for the API
+      const formattedValues = {
+        ...values,
+        event_date: new Date(values.event_date).toISOString(),
+      };
+
+      // Ensure description is properly included (explicitly include it to ensure it's not lost)
+      formattedValues.description = values.description || "";
+
+      // Ensure category_id is a number
+      if (formattedValues.category_id) {
+        formattedValues.category_id = parseInt(formattedValues.category_id, 10);
+      }
+
+      // Ensure price is a number
+      if (formattedValues.price) {
+        formattedValues.price = parseFloat(formattedValues.price);
+      }
+
+      // Process tags if provided as string
+      if (
+        typeof formattedValues.tags === "string" &&
+        formattedValues.tags.trim()
+      ) {
+        formattedValues.tags = formattedValues.tags
+          .split(",")
+          .map((tag) => tag.trim());
+      }
+
+      // Add the selected file
+      const formData = {
+        ...formattedValues,
+        image: selectedFile,
+      };
+
+      console.log("Prepared form data:", JSON.stringify(formData, null, 2));
+      console.log("Description being sent:", formData.description);
+
+      let response;
+
+      if (editingEvent) {
+        console.log("Updating event with data:", formData);
+        response = await eventService.updateEvent(editingEvent.id, formData);
+        console.log("Update event server response:", response);
+        
+        // Use the submitted event name directly from the form
+        let eventName = formData.name;
+        let eventDescription = formData.description || "";
+        
+        console.log("Submitted description:", eventDescription);
+        
+        // Handle different possible response structures for data storage
+        let eventData = response.data;
+        if (eventData) {
+          if (eventData.event && eventData.event.name) {
+            // Update our reference to use the correct structure
+            eventData = eventData.event;
+            console.log("Using nested event data:", eventData);
+          }
+        }
+        
+        setSuccessMessage(`Event "${eventName}" has been updated.`);
+
+        // Refresh the events list to get complete data from server and maintain sorting
+        await fetchEvents(currentPage);
+      } else {
+        response = await eventService.createEvent(formData);
+        console.log("Create event server response:", response);
+        
+        // Use the submitted event name directly from the form
+        let eventName = formData.name;
+        
+        // Handle different possible response structures for data storage
+        let eventData = response.data;
+        if (eventData) {
+          if (eventData.event && eventData.event.name) {
+            // Update our reference to use the correct structure
+            eventData = eventData.event;
+          }
+        }
+        
+        setSuccessMessage(`Event "${eventName}" has been created.`);
+
+        // Refresh the events list to get complete data from server and maintain sorting
+        await fetchEvents(currentPage);
+      }
+
+      handleCloseEventModal();
+    } catch (err) {
+      console.error("Error submitting form:", err);
+
+      // Extract the most useful error message
+      let errorMessage = `Failed to ${editingEvent ? "update" : "create"} event`;
+
+      if (err.response) {
+        if (err.response.data && err.response.data.message) {
+          errorMessage = err.response.data.message;
+        } else if (err.response.data && err.response.data.error) {
+          errorMessage = err.response.data.error;
+        } else if (typeof err.response.data === "string") {
+          errorMessage = err.response.data;
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+
+      setError(errorMessage);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Format event date for display
+  const formatDate = (dateString) => {
+    const options = {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    };
+    return new Date(dateString).toLocaleDateString(undefined, options);
+  };
+
+  // Format datetime for input field
+  const formatDateForInput = (dateString) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toISOString().slice(0, 16);
+  };
+
+  // Debug function to inspect event data
+  const logEventData = (event, label = "Event data") => {
+    console.log(`${label}:`, {
+      id: event?.id,
+      name: event?.name,
+      description: event?.description,
+      category_id: event?.category_id,
+      price: event?.price
+    });
+  };
+
+  // Format price display with proper null checks
+  const formatPrice = (price) => {
+    // Check if price is undefined, null, or not a number
+    if (price === undefined || price === null || isNaN(price)) {
+      return "Free"; // Default to Free if price is missing or invalid
+    }
+    return price === 0 ? "Free" : `$${Number(price).toFixed(2)}`;
+  };
+  
+  // Log an event for debugging purposes
+  const debugEvent = (event) => {
+    if (!event) return;
+    console.log("Event data:", {
+      id: event.id,
+      name: event.name,
+      description: event.description || "No description",
+      category_id: event.category_id,
+      venue: event.venue,
+      price: event.price
+    });
+  };
+
+  if (loading) {
+    return <LoadingSpinner text="Loading events..." />;
+  }
+
+  return (
+    <Container className="py-4">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2>Manage Events</h2>
+        <div className="d-flex gap-3 align-items-center">
+          <Form.Check 
+            type="switch"
+            id="active-filter-switch"
+            label="Show only upcoming events"
+            checked={filterActive}
+            onChange={() => {
+              const newState = !filterActive;
+              setFilterActive(newState);
+              if (newState) {
+                // Show only active events
+                setEvents(allEvents.filter(event => event.isActive));
+              } else {
+                // Show all events
+                setEvents(allEvents);
+              }
+            }}
+          />
+          <Button variant="success" onClick={handleAddEvent}>
+            <i className="bi bi-plus-circle me-1"></i> Add New Event
+          </Button>
+        </div>
+      </div>
+
+      {successMessage && (
+        <Alert
+          variant="success"
+          dismissible
+          onClose={() => setSuccessMessage("")}
+        >
+          {successMessage}
+        </Alert>
+      )}
+
+      {error && (
+        <Alert variant="danger" dismissible onClose={() => setError("")}>
+          {error}
+        </Alert>
+      )}
+
+      <Card className="shadow-sm">
+        <Card.Header className="bg-white d-flex justify-content-between align-items-center py-3">
+          <h5 className="mb-0">Event List</h5>
+          <span className="badge bg-primary">{events.length} Events</span>
+        </Card.Header>
+        <Card.Body>
+          {events.length > 0 ? (
+            <div className="table-responsive">
+              <Table hover>
+                <thead className="table-light">
+                  <tr>
+                    <th>Image</th>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th>Category</th>
+                    <th>Date</th>
+                    <th>Venue</th>
+                    <th>Price</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.map((event) => (
+                    <tr key={event.id} className={!event.isActive ? "table-secondary" : ""}>
+                      <td>
+                        {event.image_url ? (
+                          <img
+                            src={event.image_url}
+                            alt={event.name}
+                            style={{
+                              width: "50px",
+                              height: "50px",
+                              objectFit: "cover",
+                            }}
+                            className="rounded"
+                          />
+                        ) : (
+                          <div
+                            className="bg-light d-flex align-items-center justify-content-center rounded"
+                            style={{ width: "50px", height: "50px" }}
+                          >
+                            <i className="bi bi-image text-muted"></i>
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        {event.name}
+                        {!event.isActive && (
+                          <Badge bg="secondary" className="ms-2">Past</Badge>
+                        )}
+                      </td>
+                      <td>
+                        {event.description ? (
+                          <div title={event.description} style={{ cursor: "help" }}>
+                            {event.description.length > 50 
+                              ? `${event.description.substring(0, 50)}...` 
+                              : event.description}
+                          </div>
+                        ) : (
+                          <span className="text-muted">No description</span>
+                        )}
+                      </td>
+                      <td>
+                        <Badge bg="primary">
+                          {event.category?.name || "Uncategorized"}
+                        </Badge>
+                      </td>
+                      <td>{formatDate(event.event_date)}</td>
+                      <td>{event.venue}</td>
+                      <td>{formatPrice(event.price)}</td>
+                      <td>
+                        <div className="d-flex gap-2">
+                          <Button
+                            variant="outline-primary"
+                            size="sm"
+                            onClick={() => handleEditEvent(event)}
+                            title="Edit Event"
+                          >
+                            <i className="bi bi-pencil"></i>
+                          </Button>
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={() => handleDeleteClick(event)}
+                            title="Delete Event"
+                          >
+                            <i className="bi bi-trash"></i>
+                          </Button>
+                          <Button
+                            variant="outline-info"
+                            size="sm"
+                            onClick={() => handleViewBookings(event)}
+                            title="View Bookings"
+                          >
+                            <i className="bi bi-ticket-perforated"></i> Bookings
+                            {event.bookings_count > 0 && (
+                              <Badge bg="danger" pill className="ms-1">
+                                {event.bookings_count}
+                              </Badge>
+                            )}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          ) : (
+            <Alert variant="info">
+              No events found. Create your first event!
+            </Alert>
+          )}
+
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
+        </Card.Body>
+      </Card>
+
+      {/* Event Form Modal */}
+      <Modal show={showEventModal} onHide={handleCloseEventModal} size="lg">
+        <Modal.Header closeButton className="bg-light">
+          <Modal.Title>
+            <i className={`bi ${editingEvent ? "bi-pencil-square" : "bi-plus-circle"} me-2`}></i>
+            {editingEvent ? "Edit Event" : "Add New Event"}
+          </Modal.Title>
+        </Modal.Header>
+        <Formik
+          initialValues={{
+            name: editingEvent?.name || "",
+            description: editingEvent?.description || "",
+            category_id: editingEvent?.category_id || "",
+            event_date: formatDateForInput(editingEvent?.event_date) || "",
+            venue: editingEvent?.venue || "",
+            price: editingEvent?.price || 0,
+            tags: editingEvent?.tags
+              ? editingEvent.tags.map((tag) => tag.name).join(", ")
+              : "",
+            image: null,
+          }}
+          validationSchema={validationSchema}
+          onSubmit={handleSubmit}
+        >
+          {({
+            values,
+            errors,
+            touched,
+            handleChange,
+            handleBlur,
+            handleSubmit,
+            isSubmitting,
+            setFieldValue,
+          }) => (
+            <Form onSubmit={handleSubmit}>
+              <Modal.Body>
+                <Card className="mb-4 shadow-sm">
+                  <Card.Header className="bg-white">
+                    <h5 className="mb-0">Basic Information</h5>
+                  </Card.Header>
+                  <Card.Body>
+                    <Row>
+                      <Col md={8}>
+                        <Form.Group className="mb-3">
+                          <Form.Label>
+                            <i className="bi bi-bookmark me-1"></i>
+                            Event Name
+                          </Form.Label>
+                          <Form.Control
+                            type="text"
+                            name="name"
+                            value={values.name}
+                            onChange={handleChange}
+                            onBlur={handleBlur}
+                            isInvalid={touched.name && errors.name}
+                            placeholder="Enter event name"
+                          />
+                          <Form.Control.Feedback type="invalid">
+                            {errors.name}
+                          </Form.Control.Feedback>
+                        </Form.Group>
+                      </Col>
+                      <Col md={4}>
+                        <Form.Group className="mb-3">
+                          <Form.Label>
+                            <i className="bi bi-tag me-1"></i>
+                            Category
+                          </Form.Label>
+                          <Form.Select
+                            name="category_id"
+                            value={values.category_id}
+                            onChange={handleChange}
+                            onBlur={handleBlur}
+                            isInvalid={touched.category_id && errors.category_id}
+                          >
+                            <option value="">Select Category</option>
+                            {categories.map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.name}
+                              </option>
+                            ))}
+                          </Form.Select>
+                          <Form.Control.Feedback type="invalid">
+                            {errors.category_id}
+                          </Form.Control.Feedback>
+                        </Form.Group>
+                      </Col>
+                    </Row>
+
+                    <Form.Group className="mb-3">
+                      <Form.Label>
+                        <i className="bi bi-card-text me-1"></i>
+                        Description
+                      </Form.Label>
+                      <Form.Control
+                        as="textarea"
+                        rows={3}
+                        name="description"
+                        value={values.description || ""}
+                        onChange={(e) => {
+                          console.log("Description changed:", e.target.value);
+                          handleChange(e);
+                        }}
+                        onBlur={handleBlur}
+                        isInvalid={touched.description && errors.description}
+                        placeholder="Provide event details and description"
+                      />
+                      <Form.Control.Feedback type="invalid">
+                        {errors.description}
+                      </Form.Control.Feedback>
+                    </Form.Group>
+                  </Card.Body>
+                </Card>
+
+                <Card className="mb-4 shadow-sm">
+                  <Card.Header className="bg-white">
+                    <h5 className="mb-0">Event Details</h5>
+                  </Card.Header>
+                  <Card.Body>
+                    <Row>
+                      <Col md={6}>
+                        <Form.Group className="mb-3">
+                          <Form.Label>
+                            <i className="bi bi-calendar-event me-1"></i>
+                            Date and Time
+                          </Form.Label>
+                          <Form.Control
+                            type="datetime-local"
+                            name="event_date"
+                            value={values.event_date}
+                            onChange={handleChange}
+                            onBlur={handleBlur}
+                            isInvalid={touched.event_date && errors.event_date}
+                          />
+                          <Form.Control.Feedback type="invalid">
+                            {errors.event_date}
+                          </Form.Control.Feedback>
+                        </Form.Group>
+                      </Col>
+                      <Col md={6}>
+                        <Form.Group className="mb-3">
+                          <Form.Label>
+                            <i className="bi bi-geo-alt me-1"></i>
+                            Venue
+                          </Form.Label>
+                          <Form.Control
+                            type="text"
+                            name="venue"
+                            value={values.venue}
+                            onChange={handleChange}
+                            onBlur={handleBlur}
+                                onChange={handleBlur}
+                                isInvalid={touched.venue && errors.venue}
+                                placeholder="Enter event location"
+                              />
+                              <Form.Control.Feedback type="invalid">
+                                {errors.venue}
+                              </Form.Control.Feedback>
+                            </Form.Group>
+                          </Col>
+                        </Row>
+
+                    <Row>
+                      <Col md={6}>
+                     <Form.Group className="mb-3">
+                       <Form.Label>
+                         <i className="bi bi-currency-dollar me-1"></i>
+                         Price
+                       </Form.Label>
+                       <InputGroup hasValidation>
+                         <InputGroup.Text>$</InputGroup.Text>
+                         <Form.Control
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          name="price"
+                          value={values.price}
+                          onChange={handleChange}
+                          onBlur={handleBlur}
+                          isInvalid={touched.price && errors.price}
+                          placeholder="0.00"
+                        />
+                        <Form.Control.Feedback type="invalid">
+                          {errors.price}
+                        </Form.Control.Feedback>
+                       </InputGroup>
+                    </Form.Group>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>
+                        <i className="bi bi-tags me-1"></i>
+                        Tags (comma separated)
+                      </Form.Label>
+                      <Form.Control
+                        type="text"
+                        name="tags"
+                        value={values.tags}
+                        onChange={handleChange}
+                        placeholder="e.g. music, outdoor, family"
+                      />
+                      <Form.Text className="text-muted">
+                        Enter keywords to help users find this event
+                      </Form.Text>
+                    </Form.Group>
+                  </Col>
+                </Row>
+
+                <Card className="shadow-sm">
+                  <Card.Header className="bg-white">
+                    <h5 className="mb-0">
+                      <i className="bi bi-image me-1"></i>
+                      Event Image
+                    </h5>
+                  </Card.Header>
+                  <Card.Body>
+                    <Form.Group>
+                      <Form.Control
+                        type="file"
+                        name="image"
+                        accept="image/*"
+                        onChange={(e) => handleFileChange(e, setFieldValue)}
+                        className="mb-2"
+                      />
+                      <Form.Text className="text-muted">
+                        {editingEvent?.image_url && !selectedFile && (
+                          <>
+                            Current image will be kept unless you select a new one.
+                          </>
+                        )}
+                      </Form.Text>
+                      {editingEvent?.image_url && !selectedFile && (
+                        <div className="mt-3 text-center">
+                          <img
+                            src={editingEvent.image_url}
+                            alt="Current Event"
+                            style={{ maxWidth: "100%", maxHeight: "200px", objectFit: "cover" }}
+                            className="border rounded shadow-sm"
+                          />
+                        </div>
+                      )}
+                      {selectedFile && (
+                        <div className="mt-2">
+                          <Badge bg="success">
+                            <i className="bi bi-check-circle me-1"></i>
+                            Selected: {selectedFile.name}
+                          </Badge>
+                        </div>
+                      )}
+                    </Form.Group>
+                  </Card.Body>
+                </Card>
+              </Modal.Body>
+
+              <Modal.Footer className="bg-light">
+                <Button variant="outline-secondary" onClick={handleCloseEventModal}>
+                  <i className="bi bi-x-circle me-1"></i>
+                  Cancel
+                </Button>
+                <Button variant="primary" type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                      Saving...
+                    </>
+                  ) : editingEvent ? (
+                    <>
+                      <i className="bi bi-check-circle me-1"></i>
+                      Update Event
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-plus-circle me-1"></i>
+                      Create Event
+                    </>
+                  )}
+                </Button>
+              </Modal.Footer>
+            </Form>
+          )}
+        </Formik>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        show={showDeleteModal}
+        onHide={() => setShowDeleteModal(false)}
+        centered
+      >
+        <Modal.Header closeButton className="bg-danger text-white">
+          <Modal.Title>
+            <i className="bi bi-exclamation-triangle-fill me-2"></i>
+            Confirm Deletion
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="py-4">
+          <div className="text-center mb-3">
+            <i className="bi bi-trash text-danger" style={{ fontSize: '3rem' }}></i>
+          </div>
+          <p className="text-center fs-5">
+            Are you sure you want to delete the event <strong>"{eventToDelete?.name}"</strong>?
+          </p>
+          <p className="text-center text-muted">
+            This action cannot be undone and will remove all associated bookings.
+          </p>
+        </Modal.Body>
+        <Modal.Footer className="bg-light">
+          <Button variant="outline-secondary" onClick={() => setShowDeleteModal(false)}>
+            <i className="bi bi-x-circle me-1"></i> Cancel
+          </Button>
+          <Button variant="danger" onClick={handleConfirmDelete}>
+            <i className="bi bi-trash me-1"></i> Delete Event
+          </Button>
+        </Modal.Footer>
+      </Modal>
+      
+      {/* Event Bookings Modal */}
+      <Modal
+        show={showBookingsModal}
+        onHide={() => setShowBookingsModal(false)}
+        size="lg"
+        centered
+      >
+        <Modal.Header closeButton className="bg-light">
+          <Modal.Title>
+            <i className="bi bi-people me-2"></i>
+            Bookings for {selectedEvent?.name}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+            {error && (
+              <Alert variant="danger" dismissible onClose={() => setError("")}>
+                {error}
+              </Alert>
+            )}
+            {successMessage && (
+              <Alert variant="success" dismissible onClose={() => setSuccessMessage("")}>
+                {successMessage}
+              </Alert>
+            )}
+            {bookingsLoading ? (
+              <div className="text-center py-4">
+                <LoadingSpinner text="Loading bookings..." />
+              </div>
+            ) : eventBookings.length > 0 ? (
+              <>
+                <div className="d-flex justify-content-between mb-3">
+                  <h5>
+                    <Badge bg="info" className="me-2">{eventBookings.length}</Badge>
+                    Total Bookings
+                  </h5>
+                  <div>
+                    <Badge bg="primary" className="p-2">
+                      <i className="bi bi-calendar-event me-1"></i>
+                      {formatDate(selectedEvent?.event_date)}
+                    </Badge>
+                    {selectedEvent?.price > 0 && (
+                      <Badge bg="success" className="p-2 ms-2">
+                        <i className="bi bi-tag-fill me-1"></i>
+                        ${selectedEvent.price.toFixed(2)}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              
+                <div className="table-responsive">
+                  <Table hover>
+                    <thead className="table-light">
+                      <tr>
+                        <th>Booking ID</th>
+                        <th>User</th>
+                        <th>Date Booked</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eventBookings.map((booking) => (
+                        <tr key={booking.id}>
+                          <td>#{booking.id}</td>
+                          <td>{booking.user?.name || booking.user?.email || (booking.user && `User #${booking.user.id}`) || `User #${booking.user_id || "Unknown"}`}</td>
+                          <td>{formatDate(booking.created_at)}</td>
+                          <td>
+                            <Badge 
+                              bg={
+                                booking.status === "confirmed" ? "success" : 
+                                booking.status === "cancelled" ? "danger" : 
+                                "warning"
+                              }
+                            >
+                              {booking.status}
+                            </Badge>
+                          </td>
+                          <td>
+                            {booking.status !== "cancelled" && (
+                              <Button
+                                variant="outline-danger"
+                                size="sm"
+                                onClick={() => handleUpdateBookingStatus(booking.id, "cancelled")}
+                              >
+                                <i className="bi bi-x-circle"></i> Cancel
+                              </Button>
+                            )}
+                            {booking.status !== "confirmed" && booking.status !== "cancelled" && (
+                              <Button
+                                variant="outline-success"
+                                size="sm"
+                                className="ms-1"
+                                onClick={() => handleUpdateBookingStatus(booking.id, "confirmed")}
+                              >
+                                <i className="bi bi-check-circle"></i> Confirm
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              </>
+            ) : (
+              <Alert variant="info">
+                No bookings found for this event.
+              </Alert>
+            )}
+        </Modal.Body>
+        <Modal.Footer className="bg-light">
+          <Button variant="outline-secondary" onClick={() => setShowBookingsModal(false)}>
+            <i className="bi bi-x-circle me-1"></i> Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </Container>
+  );
+};
+
+// Helper function to format dates consistently
+const formatDate = (dateString) => {
+  if (!dateString) return "N/A";
+  const options = {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  };
+  return new Date(dateString).toLocaleDateString(undefined, options);
+};
+
+export default AdminEvents;

@@ -39,6 +39,15 @@ func (r *UserRepository) Update(user *models.User) error {
 	return r.DB.Save(user).Error
 }
 
+func (r *UserRepository) GetAllUsers() ([]models.User, error) {
+	var users []models.User
+	err := r.DB.Find(&users).Error
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 func (r *UserRepository) CreateAdminIfNotExists(adminEmail string) error {
 	var count int64
 	r.DB.Model(&models.User{}).Where("role = ?", models.RoleAdmin).Count(&count)

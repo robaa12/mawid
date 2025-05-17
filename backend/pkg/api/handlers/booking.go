@@ -33,7 +33,7 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		return
 	}
 
-	booking, err := h.BookingService.CreateBooking(userID.(uint), input) // Change userID type from any to uint
+	booking, err := h.BookingService.CreateBooking(userID.(uint), input)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusBadRequest, "Failed to create booking", err.Error())
 		return
@@ -43,66 +43,66 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 }
 
 func (h *BookingHandler) GetUserBookings(c *gin.Context) {
-	userID, exists := c.Get("user_id")
+	uid, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "User not authenticated", nil)
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	p, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	ps, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
-	bookings, err := h.BookingService.GetUserBookings(userID.(uint), page, pageSize)
+	res, err := h.BookingService.GetUserBookings(uid.(uint), p, ps)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve bookings", err.Error())
 		return
 	}
 
-	if bookings.Total == 0 {
-		utils.SuccessResponse(c, http.StatusOK, "No bookings found", bookings)
+	if res.Total == 0 {
+		utils.SuccessResponse(c, http.StatusOK, "No bookings found", res)
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, "Bookings retrieved successfully", bookings)
+	utils.SuccessResponse(c, http.StatusOK, "Bookings retrieved successfully", res)
 }
 
 func (h *BookingHandler) CheckEventBookings(c *gin.Context) {
-	userID, exists := c.Get("user_id")
+	uid, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "User not authenticated", nil)
 		return
 	}
 
-	eventID, err := strconv.ParseUint(c.Param("eventId"), 10, 32)
+	evtID, err := strconv.ParseUint(c.Param("eventId"), 10, 32)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid event ID", err.Error())
 		return
 	}
 
-	hasBooking, booking, err := h.BookingService.CheckUserBooking(userID.(uint), uint(eventID))
+	has, b, err := h.BookingService.CheckUserBooking(uid.(uint), uint(evtID))
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to check booking", err.Error())
 		return
 	}
 
 	result := gin.H{
-		"has_booking": hasBooking,
+		"has_booking": has,
 	}
-	if hasBooking {
-		result["booking"] = booking
+	if has {
+		result["booking"] = b
 	}
 
 	utils.SuccessResponse(c, http.StatusOK, "Booking check completed", result)
 }
 
 func (h *BookingHandler) UpdateBookingStatus(c *gin.Context) {
-	userID, exists := c.Get("user_id")
+	uid, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "User not authenticated", nil)
 		return
 	}
 
-	bookingID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	bid, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid booking ID", err.Error())
 		return
@@ -114,11 +114,29 @@ func (h *BookingHandler) UpdateBookingStatus(c *gin.Context) {
 		return
 	}
 
-	booking, err := h.BookingService.UpdateBookingStatus(uint(bookingID), userID.(uint), input)
+	b, err := h.BookingService.UpdateBookingStatus(uint(bid), uid.(uint), input)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusBadRequest, "Failed to update booking status", err.Error())
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, "Booking status updated sucessfully", booking)
+	utils.SuccessResponse(c, http.StatusOK, "Booking status updated sucessfully", b)
+}
+
+func (h *BookingHandler) GetAllBookings(c *gin.Context) {
+	_, exists := c.Get("user_id")
+	if !exists {
+		utils.ErrorResponse(c, http.StatusUnauthorized, "User not authenticated", nil)
+		return
+	}
+
+	p, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	ps, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	bs, err := h.BookingService.GetAllBookings(p, ps)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get bookings", err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Bookings retrieved successfully", bs)
 }

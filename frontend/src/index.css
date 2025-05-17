@@ -1,0 +1,133 @@
+/* Global CSS Reset and Styling */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  width: 100%;
+}
+
+*, *:before, *:after {
+  box-sizing: inherit;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Main container - no default padding */
+.main-container {
+  padding: 0;
+  width: 100%;
+  overflow-x: hidden;
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* App-wide structure */
+.app {
+  width: 100%;
+  overflow-x: hidden;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Page container for sticky footer */
+.page-container {
+  position: relative;
+  min-height: 100vh;
+}
+
+/* Content wrapper that pushes footer down */
+.content-wrap {
+  flex: 1 0 auto;
+  padding-bottom: 2rem; /* Space for footer */
+}
+
+/* Footer positioning */
+.footer {
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.footer-sticky {
+  margin-top: auto;
+}
+
+/* Hero section styling */
+.hero-section {
+  width: 100%;
+  padding: 80px 0;
+  margin: 0;
+  background: linear-gradient(to right, #4568dc, #b06ab3);
+  color: white;
+}
+
+/* Navbar styling adjustments */
+.custom-navbar {
+  margin-bottom: 0;
+  width: 100%;
+}
+
+/* Container adjustments */
+.container {
+  max-width: 100%;
+  width: 100%;
+}
+
+/* Page transitions */
+.page-transition {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* Home page specific */
+.home-page {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.home-page .container {
+  padding-left: 15px;
+  padding-right: 15px;
+}
+
+/* Responsive container widths */
+@media (min-width: 576px) {
+  .container {
+    max-width: 540px;
+  }
+}
+
+@media (min-width: 768px) {
+  .container {
+    max-width: 720px;
+  }
+}
+
+@media (min-width: 992px) {
+  .container {
+    max-width: 960px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .container {
+    max-width: 1140px;
+  }
+}
+
+/* Upcoming Events section */
+.upcoming-events {
+  padding: 60px 0;
+  margin: 0;
+}

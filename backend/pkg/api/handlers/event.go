@@ -76,8 +76,19 @@ func (h *EventHandler) CreateEvent(c *gin.Context) {
 func (h *EventHandler) GetEvents(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	
+	// Get category filter if provided
+	categoryIDStr := c.Query("category_id")
+	var categoryID uint
+	if categoryIDStr != "" {
+		parsedID, err := strconv.ParseUint(categoryIDStr, 10, 32)
+		if err == nil {
+			categoryID = uint(parsedID)
+		}
+	}
 
-	events, err := h.EventService.GetAllEvents(page, pageSize)
+	// Returns events sorted by date (upcoming events first)
+	events, err := h.EventService.GetAllEvents(page, pageSize, categoryID)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve events", err.Error())
 		return
@@ -85,9 +96,10 @@ func (h *EventHandler) GetEvents(c *gin.Context) {
 
 	if events.Total < 1 {
 		utils.SuccessResponse(c, http.StatusNotFound, "No events found", nil)
+		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, "Events retrived successfully", events)
+	utils.SuccessResponse(c, http.StatusOK, "Events retrieved successfully", events)
 }
 
 func (h *EventHandler) GetEventByID(c *gin.Context) {
@@ -176,6 +188,18 @@ func (h *EventHandler) SearchEvents(c *gin.Context) {
 	utils.SuccessResponse(c, http.StatusOK, "Search results", events)
 }
 
+// GetRecentEvents returns the 5 most recent events, prioritizing upcoming events
+// Uses server-side caching for better performance
+func (h *EventHandler) GetRecentEvents(c *gin.Context) {
+	events, err := h.EventService.GetRecentEvents()
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve recent events", err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Recent events retrieved successfully", events)
+}
+
 func (h *EventHandler) GetCategories(c *gin.Context) {
 	categories, err := h.EventService.GetAllCategories()
 	if err != nil {
@@ -244,5 +268,5 @@ func (h *EventHandler) DeleteCategory(c *gin.Context) {
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, "Category deleted successfully", nil)
+	utils.SuccessResponse(c, http.StatusOK, "Category and all its associated events deleted successfully", nil)
 }

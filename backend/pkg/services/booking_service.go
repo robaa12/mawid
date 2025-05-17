@@ -165,6 +165,32 @@ func (s *BookingService) UpdateBookingStatus(bookingID, userID uint, input Updat
 	return s.mapBookingToResponse(*updateBooking), nil
 }
 
+func (s *BookingService) GetAllBookings(page, pageSize int) (*PaginatedBookings, error) {
+	page, pageSize = s.normalizePagination(page, pageSize)
+	var bookings []models.Booking
+	var total int64
+	
+	// First count total bookings
+	if err := s.BookingRepo.DB.Model(&models.Booking{}).Count(&total).Error; err != nil {
+		return nil, err
+	}
+	
+	// Then get paginated bookings with all needed relations
+	offset := (page - 1) * pageSize
+	query := s.BookingRepo.DB.
+		Preload("User").
+		Preload("Event").
+		Offset(offset).
+		Limit(pageSize).
+		Order("created_at DESC")
+
+	if err := query.Find(&bookings).Error; err != nil {
+		return nil, err
+	}
+
+	return s.createPaginatedResponse(bookings, total, page, pageSize)
+}
+
 // Helper Methods
 
 func (s *BookingService) normalizePagination(page, pageSize int) (int, int) {
