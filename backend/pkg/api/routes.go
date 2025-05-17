@@ -59,7 +59,7 @@ func SetupRoutes(router *gin.Engine, authHandler *handlers.AuthHandler, eventHan
 	router.Use(SecurityHeadersMiddleware())
 
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8000", "http://localhost:5500", "http://127.0.0.1:5500"},
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8000", "http://localhost:5500", "http://127.0.0.1:5500", "https://mawid-app.netlify.app", "https://*.netlify.app", "*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
