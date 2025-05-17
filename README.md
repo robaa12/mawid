@@ -5,7 +5,7 @@
 Mawid is a full-stack event management and booking platform that enables users to discover, book, and manage events. The platform provides a user-friendly interface for attendees and a powerful administrative dashboard for event organizers and system administrators.
 
 [Live Demo - Frontend](https://mawid.netlify.app/)
-[Live Demo - Backend API](https://mawid-production.up.railway.app)
+[Live Demo - Backend API](https://mawid-production.up.railway.app/api/v1/events)
 
 ## Table of Contents
 
