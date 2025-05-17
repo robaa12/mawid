@@ -53,3 +53,4 @@ Database-data/
 # OS specific
 Thumbs.db
 .directory
+Dockerfile
