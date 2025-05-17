@@ -102,16 +102,19 @@ const Events = () => {
 
       if (response && response.data && response.data.events) {
         setEvents(response.data.events);
+        setFilteredEvents(response.data.events); // Update filteredEvents with search results
         setTotalPages(response.data.total_pages || 1);
       } else {
         console.error("Unexpected search response format:", response);
         setEvents([]);
+        setFilteredEvents([]); // Also update filteredEvents
         setError("Unexpected data format received from search");
       }
     } catch (err) {
       console.error("Failed to search events:", err);
       setError("Failed to search events. Please try again later.");
       setEvents([]); // Reset to empty array on error
+      setFilteredEvents([]); // Also reset filteredEvents on error
     } finally {
       setLoading(false);
     }
