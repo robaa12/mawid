@@ -18,22 +18,18 @@ const bookingService = {
         // Handle different possible response structures
         let bookingsData = [];
         let totalPages = 1;
-        let total = 0;
       
         if (response.data && response.data.success && response.data.data) {
           // Format: { success: true, data: { bookings: [...], total_pages: X } }
           bookingsData = response.data.data.bookings || [];
           totalPages = response.data.data.total_pages || 1;
-          total = response.data.data.total || 0;
         } else if (response.data && response.data.bookings) {
           // Format: { bookings: [...], total_pages: X }
           bookingsData = response.data.bookings;
           totalPages = response.data.total_pages || 1;
-          total = response.data.total || 0;
         } else if (Array.isArray(response.data)) {
           // Format: Direct array of bookings
           bookingsData = response.data;
-          total = response.data.length;
         }
       
         console.log(`Total bookings before filtering: ${bookingsData.length}`);
