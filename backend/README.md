@@ -1,29 +1,336 @@
-# Mawid - Event Booking Platform
+Mawid Backend - Technical Documentation
 
-Mawid (مَوعِد) is a comprehensive event booking platform that allows users to discover, manage, and book tickets for various events.
+Live-Link for the backend :- [Backend Deployment](mawid-production.up.railway.app)
 
 ## Table of Contents
+1. [Code Architecture](#code-architecture)
+2. [Database Caching](#database-caching)
+3. [Database Indexing](#database-indexing)
+4. [Golang Best Practices](#golang-best-practices)
+5. [API Doc](#api-documentation)
 
-- [Overview](#overview)
-- [Features](#features)
-- [Getting Started](#getting-started)
-- [API Documentation](#api-documentation)
-- [Architecture](#architecture)
-- [Security](#security)
-- [Database Schema](#database-schema)
+## Code Architecture
 
-## Overview
+The Mawid backend follows a clean, layered architecture designed for scalability, maintainability, and testability. The architecture is inspired by Domain-Driven Design (DDD) principles and follows the dependency injection pattern.
 
-Mawid backend is built with Go and uses PostgreSQL for data storage. The application provides a RESTful API for the frontend client to interact with.
+### Layers
 
-## Features
+1. **API Layer** (`pkg/api`)
+   - Handles HTTP requests and responses
+   - Implements middleware for authentication, authorization, rate limiting, and security
+   - Uses the Gin framework for routing and request handling
+   - Completely decoupled from business logic
 
-- User authentication and authorization
-- Event creation, management, and discovery
-- Category management
-- Event booking and ticket management
-- Admin dashboard with user and event management
-- Image upload and storage integration
+2. **Service Layer** (`pkg/services`)
+   - Implements core business logic
+   - Orchestrates data flow between repositories
+   - Enforces business rules and validation
+   - Handles cross-cutting concerns like caching
+
+3. **Repository Layer** (`pkg/repository`)
+   - Provides data access abstraction
+   - Implements database operations using GORM
+   - Isolates the rest of the application from data storage details
+   - Allows for easy switching of data sources
+
+4. **Model Layer** (`pkg/models`)
+   - Defines domain entities and data structures
+   - Implements entity-specific business rules
+   - Uses GORM tags for database mapping
+
+5. **Utility Layer** (`internal/utils`)
+   - Provides shared functionality like caching, JWT handling, etc.
+   - Implements cross-cutting concerns
+
+### Key Design Patterns
+
+1. **Dependency Injection**
+   - Services receive repositories as constructor parameters
+   - Handlers receive services as constructor parameters
+   - Makes testing easier through mock injection
+   - Example:
+   ```go
+   // Repository creation
+   userRepo := repository.NewUserRepository(database)
+
+   // Service creation with injected repository
+   authService := services.NewAuthService(userRepo, cfg)
+
+   // Handler creation with injected service
+   authHandler := handlers.NewAuthHandler(authService)
+   ```
+
+2. **Repository Pattern**
+   - Each entity has its own repository
+   - Example:
+   ```go
+   func (r *EventRepository) GetEventByID(id uint) (*models.Event, error) {
+       var event models.Event
+       if err := r.DB.Preload("Category").Preload("Tags").First(&event, id).Error; err != nil {
+           return nil, err
+       }
+       return &event, nil
+   }
+   ```
+
+3. **Middleware Chain**
+   - Middleware functions are chained for route protection
+   - Allows for fine-grained access control
+   - Example:
+   ```go
+   adminRoutes.Use(middlewars.AuthMidddleware(cfg), middlewars.AdminMiddleware())
+   ```
+
+### Architecture Diagram
+
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   HTTP      │      │  Handlers   │      │  Services   │      │ Repositories│
+│   Request   │─────▶│  (API Layer)│─────▶│ (Biz Logic) │─────▶│ (Data Layer)│
+└─────────────┘      └─────────────┘      └─────────────┘      └──────┬──────┘
+                           ▲                    ▲                     │
+                           │                    │                     ▼
+                           │                    │               ┌─────────────┐
+                           │                    │               │  Database   │
+                           │                    │               │ (PostgreSQL)│
+                           │                    │               └─────────────┘
+                     ┌─────┴──────┐      ┌──────┴─────┐
+                     │ Middleware │      │   Models   │      ┌─────────────┐
+                     │  (Auth,    │      │  (Domain   │      │   Utils     │
+                     │   CORS)    │      │   Entities)│      │  (Shared)   │
+                     └────────────┘      └────────────┘      └─────────────┘
+```
+
+## Database Caching
+
+Mawid implements a sophisticated in-memory caching strategy to reduce database load and improve response times.
+
+### In-Memory Cache Implementation
+
+1. **Generic Cache Utility**
+   - Thread-safe with mutex locks
+   - Support for expiration times
+   - Automatic cleanup of expired items
+   ```go
+   type Cache struct {
+       mu      sync.RWMutex
+       items   map[string]any
+       expires map[string]time.Time
+   }
+   ```
+
+2. **Cache Initialization and Cleanup**
+   - Background goroutine for automatic cleanup
+   ```go
+   func NewCache() *Cache {
+       cache := &Cache{
+           items:   make(map[string]any),
+           expires: make(map[string]time.Time),
+       }
+       go cache.startCleanupTimer()
+       return cache
+   }
+
+   func (c *Cache) startCleanupTimer() {
+       ticker := time.NewTicker(5 * time.Minute)
+       defer ticker.Stop()
+       for range ticker.C {
+           c.cleanup()
+       }
+   }
+   ```
+
+3. **Event Service Caching**
+   - Initialization of cache on service startup
+   - Automatic refresh of recent events every 2 minutes
+   - Manual invalidation on events CRUD operations
+   ```go
+   go func() {
+       fmt.Println("[CACHE INIT] Populating recent events cache on startup")
+       if _, err := service.cacheRecentEvents(); err != nil {
+           fmt.Println("[CACHE INIT ERROR] Failed to initialize cache:", err)
+       }
+
+       ticker := time.NewTicker(2 * time.Minute)
+       go func() {
+           for range ticker.C {
+               // Auto-refresh cache
+               service.cacheMutex.Lock()
+               service.cache.Delete("recent_events")
+               service.cacheMutex.Unlock()
+
+               if _, err := service.cacheRecentEvents(); err != nil {
+                   fmt.Println("[CACHE AUTO-REFRESH ERROR] Failed to refresh cache:", err)
+               }
+           }
+       }()
+   }()
+   ```
+
+### Cached Data
+
+1. **Recent Events**
+   - Top 5 events, prioritizing upcoming events
+   - Cached for 5 minutes
+   - Used for homepage and discovery features
+   ```go
+   func (s *EventService) cacheRecentEvents() (*PaginatedEvents, error) {
+       // Fetch from database
+       evts, _, err := s.EventRepo.GetAll(1, 8, 0)
+       if err != nil {
+           return nil, err
+       }
+
+       // Keep only top 5 events
+       var topEvents []models.Event
+       if len(evts) > 5 {
+           topEvents = evts[:5]
+       } else {
+           topEvents = evts
+       }
+
+       result, err := s.createPaginatedResponse(topEvents, int64(len(topEvents)), 1, 5)
+       if err != nil {
+           return nil, err
+       }
+
+       // Cache with expiration
+       s.cache.Set("recent_events", result, 5*time.Minute)
+
+       return result, nil
+   }
+   ```
+
+2. **Individual Events**
+   - Caching individual event details
+   - Invalidated on update or delete
+   ```go
+   cacheKey := fmt.Sprintf("event_%d", id)
+   s.cache.Set(cacheKey, eventResp, 5*time.Minute)
+   ```
+
+## Database Indexing
+
+Mawid employs strategic database indexing to optimize query performance, especially for common operations.
+
+### Index Types Implemented
+
+1. **B-Tree Indexes**
+   - Used for equality and range queries
+   - Applied to columns frequently used in WHERE clauses
+   - Used in filtering events by date
+   ```sql
+   CREATE INDEX IF NOT EXISTS idx_events_event_date ON events(event_date)
+   ```
+
+2. **Composite Indexes**
+   - Used for multi-column filtering and sorting
+   - Optimizes queries that filter on multiple conditions like filtering events using category and date
+   ```sql
+   CREATE INDEX IF NOT EXISTS idx_events_category_date ON events(category_id, event_date)
+   ```
+
+### Indexing Strategy
+
+**Query-Driven Indexing**
+   - Indexes are added based on query patterns
+   - Frequent search and filter operations are identified and indexed
+
+## Golang Best Practices
+
+The Mawid backend demonstrates several Golang best practices and idioms:
+
+### Concurrency Patterns
+
+1. **Goroutines for Non-Blocking Operations**
+   - Background caching and cleanup
+   ```go
+   go func() {
+       ticker := time.NewTicker(2 * time.Minute)
+       for range ticker.C {
+           // Cache refresh logic
+       }
+   }()
+   ```
+
+2. **Mutex for Thread Safety**
+   - Proper synchronization of shared resources
+   ```go
+   type Cache struct {
+       mu      sync.RWMutex
+       items   map[string]any
+       expires map[string]time.Time
+   }
+
+   func (c *Cache) Get(key string) (any, bool) {
+       c.mu.RLock()
+       defer c.mu.RUnlock()
+       // Cache read logic
+   }
+   ```
+### Error Handling
+
+1. **Error Wrapping**
+   - Contextual error messages
+   ```go
+   if err != nil {
+       return fmt.Errorf("failed to get database connection: %w", err)
+   }
+   ```
+
+2. **Consistent Error Responses**
+   - Structured error responses
+   ```go
+   func ErrorResponse(c *gin.Context, statusCode int, message string, err any) {
+       c.JSON(statusCode, Response{
+           Success: false,
+           Message: message,
+           Error:   err,
+       })
+   }
+   ```
+
+### Security Practices
+
+1. **JWT-Based Authentication**
+   - Secure token generation and validation
+   ```go
+   func GenerateJWT(user models.User, cfg *config.Config) (string, time.Time, error) {
+       // JWT generation logic
+   }
+
+   func ValidateToken(tokenString string, cfg *config.Config) (*JWTClaim, error) {
+       // JWT validation logic
+   }
+   ```
+
+2. **Middleware Security Chain**
+   - Multiple security middlewares
+   ```go
+   router.Use(gin.Recovery())
+   router.Use(RateLimiterMiddleware())
+   router.Use(SecurityHeadersMiddleware())
+   ```
+
+### Performance Optimizations
+
+1. **Pagination**
+   - All list endpoints support pagination
+   ```go
+   func (s *EventService) GetAllEvents(page, pageSize int, categoryID uint) (*PaginatedEvents, error) {
+       // Pagination logic
+   }
+   ```
+
+2. **Efficient Database Queries**
+   - Smart selection of what to fetch
+   - Uses GORM's Preload for eager loading
+
+3. **Response Caching**
+   - In-memory caching for frequently accessed data
+
+4. **Background Processing**
+   - Offloading non-critical operations to background goroutines
 
 ## Getting Started
 
@@ -36,451 +343,26 @@ Mawid backend is built with Go and uses PostgreSQL for data storage. The applica
 ### Installation
 
 1. Clone the repository
-```
+```bash
 git clone https://github.com/robaa12/mawid.git
 cd mawid/backend
 ```
 
 2. Configure environment variables
-```
+```bash
 cp cmd/server/.env.example cmd/server/.env
 ```
-Edit the `.env` file with your configuration.
 
 3. Run the server
-```
+```bash
 go run cmd/server/main.go
 ```
 
 Or with Docker:
-```
+```bash
 docker-compose up -d
 ```
 
-## API Documentation
+### API Documentation
 
-### Authentication
-
-#### Register a new user
-```
-POST /api/v1/auth/register
-```
-Request body:
-```json
-{
-  "name": "User Name",
-  "email": "user@example.com",
-  "password": "password123"
-}
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "User registered successfully",
-  "data": {
-    "token": "JWT_TOKEN",
-    "user": {
-      "id": 1,
-      "name": "User Name",
-      "email": "user@example.com",
-      "role": "user"
-    },
-    "expires_at": 1620000000,
-    "token_type": "Bearer"
-  }
-}
-```
-
-#### Login
-```
-POST /api/v1/auth/login
-```
-Request body:
-```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Login successful",
-  "data": {
-    "token": "JWT_TOKEN",
-    "user": {
-      "id": 1,
-      "name": "User Name",
-      "email": "user@example.com",
-      "role": "user"
-    },
-    "expires_at": 1620000000,
-    "token_type": "Bearer"
-  }
-}
-```
-
-#### Get User Profile
-```
-GET /api/v1/auth/profile
-```
-Headers:
-```
-Authorization: Bearer JWT_TOKEN
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Profile retrieved successfully",
-  "data": {
-    "id": 1,
-    "name": "User Name",
-    "email": "user@example.com",
-    "role": "user"
-  }
-}
-```
-
-### Events
-
-#### Get All Events
-```
-GET /api/v1/events?page=1&page_size=10&category_id=1
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Events retrieved successfully",
-  "data": {
-    "events": [
-      {
-        "id": 1,
-        "name": "Sample Event",
-        "description": "Event description",
-        "category": {
-          "id": 1,
-          "name": "Conference"
-        },
-        "event_date": "2023-07-15T14:00:00Z",
-        "venue": "Event Venue",
-        "price": 99.99,
-        "image_url": "https://example.com/image.jpg",
-        "tags": [
-          {
-            "id": 1,
-            "name": "tech"
-          }
-        ]
-      }
-    ],
-    "total": 10,
-    "page": 1,
-    "page_size": 10,
-    "total_pages": 1
-  }
-}
-```
-
-#### Get Event by ID
-```
-GET /api/v1/events/:id
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Event retrieved successfully",
-  "data": {
-    "id": 1,
-    "name": "Sample Event",
-    "description": "Event description",
-    "category": {
-      "id": 1,
-      "name": "Conference"
-    },
-    "event_date": "2023-07-15T14:00:00Z",
-    "venue": "Event Venue",
-    "price": 99.99,
-    "image_url": "https://example.com/image.jpg",
-    "tags": [
-      {
-        "id": 1,
-        "name": "tech"
-      }
-    ]
-  }
-}
-```
-
-#### Search Events
-```
-GET /api/v1/events/search?q=conference&page=1&page_size=10
-```
-Response: Same format as Get All Events
-
-#### Create Event (Admin only)
-```
-POST /api/v1/events
-```
-Headers:
-```
-Authorization: Bearer JWT_TOKEN
-Content-Type: multipart/form-data
-```
-Form data:
-```
-name: "Sample Event"
-description: "Event description"
-category_id: 1
-event_date: "2023-07-15T14:00:00Z"
-venue: "Event Venue"
-price: 99.99
-tags: "tech,conference"
-image: (file upload)
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Event created successfully",
-  "data": {
-    "id": 1,
-    "name": "Sample Event",
-    "description": "Event description",
-    "category": {
-      "id": 1,
-      "name": "Conference"
-    },
-    "event_date": "2023-07-15T14:00:00Z",
-    "venue": "Event Venue",
-    "price": 99.99,
-    "image_url": "https://example.com/image.jpg",
-    "tags": [
-      {
-        "id": 1,
-        "name": "tech"
-      }
-    ]
-  }
-}
-```
-
-#### Update Event (Admin only)
-```
-PUT /api/v1/events/:id
-```
-Request: Same as Create Event
-Response: Same as Create Event
-
-#### Delete Event (Admin only)
-```
-DELETE /api/v1/events/:id
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Event deleted successfully"
-}
-```
-
-### Categories
-
-#### Get All Categories
-```
-GET /api/v1/events/categories
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Categories retrieved successfully",
-  "data": [
-    {
-      "id": 1,
-      "name": "Conference"
-    },
-    {
-      "id": 2,
-      "name": "Workshop"
-    }
-  ]
-}
-```
-
-#### Create Category (Admin only)
-```
-POST /api/v1/events/categories
-```
-Request body:
-```json
-{
-  "name": "Conference"
-}
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Category created successfully",
-  "data": {
-    "id": 1,
-    "name": "Conference"
-  }
-}
-```
-
-### Bookings
-
-#### Create Booking
-```
-POST /api/v1/bookings
-```
-Headers:
-```
-Authorization: Bearer JWT_TOKEN
-```
-Request body:
-```json
-{
-  "event_id": 1
-}
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Booking created successfully",
-  "data": {
-    "id": 1,
-    "user_id": 1,
-    "event_id": 1,
-    "booking_date": "2023-05-10T15:30:45Z",
-    "status": "confirmed"
-  }
-}
-```
-
-#### Get User Bookings
-```
-GET /api/v1/bookings?page=1&page_size=10
-```
-Headers:
-```
-Authorization: Bearer JWT_TOKEN
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Bookings retrieved successfully",
-  "data": {
-    "bookings": [
-      {
-        "id": 1,
-        "user_id": 1,
-        "event_id": 1,
-        "booking_date": "2023-05-10T15:30:45Z",
-        "status": "confirmed",
-        "event": {
-          "id": 1,
-          "name": "Sample Event",
-          "venue": "Event Venue",
-          "image_url": "https://example.com/image.jpg"
-        }
-      }
-    ],
-    "total": 5,
-    "page": 1,
-    "page_size": 10,
-    "total_pages": 1
-  }
-}
-```
-
-#### Check Event Booking Status
-```
-GET /api/v1/bookings/event/:eventId
-```
-Headers:
-```
-Authorization: Bearer JWT_TOKEN
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Booking check completed",
-  "data": {
-    "has_booking": true,
-    "booking": {
-      "id": 1,
-      "user_id": 1,
-      "event_id": 1,
-      "booking_date": "2023-05-10T15:30:45Z",
-      "status": "confirmed"
-    }
-  }
-}
-```
-
-#### Update Booking Status
-```
-PUT /api/v1/bookings/:id/status
-```
-Headers:
-```
-Authorization: Bearer JWT_TOKEN
-```
-Request body:
-```json
-{
-  "status": "cancelled"
-}
-```
-Response:
-```json
-{
-  "success": true,
-  "message": "Booking status updated successfully",
-  "data": {
-    "id": 1,
-    "user_id": 1,
-    "event_id": 1,
-    "booking_date": "2023-05-10T15:30:45Z",
-    "status": "cancelled"
-  }
-}
-```
-
-## Architecture
-
-The backend follows a clean architecture pattern with the following components:
-
-1. **API Layer**: Handles HTTP requests and responses
-2. **Service Layer**: Implements business logic 
-3. **Repository Layer**: Manages data access and persistence
-4. **Model Layer**: Defines data structures
-
-## Security
-
-- JWT-based authentication
-- Role-based authorization
-- Password hashing with bcrypt
-- Rate limiting for API endpoints
-- CORS protection
-- Input validation and sanitization
-
-## Database Schema
-
-The application uses the following main entities:
-
-- **Users**: Manages user accounts and authentication
-- **Events**: Stores event information
-- **Categories**: Organizes events into categories
-- **Tags**: Provides additional event classification
-- **Bookings**: Tracks user event bookings
+The API documentation is available in [Postman](https://documenter.getpostman.com/view/44767514/2sB2qWHjD5)
