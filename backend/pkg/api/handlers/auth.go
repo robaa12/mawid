@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/robaa12/mawid/internal/utils"
+	"github.com/robaa12/mawid/pkg/models"
 	"github.com/robaa12/mawid/pkg/services"
 )
 
@@ -105,7 +106,14 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 
 func (h *AuthHandler) GetAllUsers(c *gin.Context) {
 	role, exists := c.Get("role")
-	if !exists || role != "admin" {
+	if !exists {
+		utils.ErrorResponse(c, http.StatusUnauthorized, "Unauthorized", "User not authenticated")
+		return
+	}
+
+	// Convert role to string for reliable comparison
+	roleStr := fmt.Sprintf("%v", role)
+	if roleStr != string(models.RoleAdmin) {
 		log.Printf("Unauthorized attempt to access users list. Role: %v, IP: %s", role, c.ClientIP())
 		utils.ErrorResponse(c, http.StatusForbidden, "Forbidden", "Admin access required")
 		return

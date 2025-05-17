@@ -15,6 +15,8 @@ type Config struct {
 	DBUser     string
 	DBPassword string
 	DBName     string
+	DBSSLMode  string
+	DatabaseURL string
 
 	// Authentication settings
 	JWTSecret  string
@@ -40,11 +42,13 @@ func LoadConfig() *Config {
 
 	return &Config{
 		// Database settings
-		DBHost:     getEnv("DB_HOST", "localhost"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("POSTGRES_USER", "postgres"),
-		DBPassword: getEnv("POSTGRES_PASSWORD", "password"),
-		DBName:     getEnv("POSTGRES_DB", "mawid"),
+		DBHost:      getEnv("DB_HOST", "localhost"),
+		DBPort:      getEnv("DB_PORT", "5432"),
+		DBUser:      getEnv("POSTGRES_USER", "postgres"),
+		DBPassword:  getEnv("POSTGRES_PASSWORD", "password"),
+		DBName:      getEnv("POSTGRES_DB", "mawid"),
+		DBSSLMode:   getEnv("DB_SSL_MODE", "disable"),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
 
 		// Auth settings
 		JWTSecret:  getEnv("JWT_SECRET", "your-secret-key"),

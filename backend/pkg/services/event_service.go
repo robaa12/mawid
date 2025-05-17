@@ -68,37 +68,37 @@ type (
 
 func NewEventService(eventRepo *repository.EventRepository, storageService *utils.StorageService, bookingRepo *repository.BookingRepository) *EventService {
 	fmt.Println("[CACHE INIT] Creating new event service with cache")
-	
+
 	service := &EventService{
 		EventRepo:      eventRepo,
 		StorageService: storageService,
 		BookingRepo:    bookingRepo,
 		cache:          utils.NewCache(),
 	}
-	
+
 	go func() {
 		fmt.Println("[CACHE INIT] Populating recent events cache on startup")
-		
+
 		if _, err := service.cacheRecentEvents(); err != nil {
 			fmt.Println("[CACHE INIT ERROR] Failed to initialize cache:", err)
 		}
-		
+
 		ticker := time.NewTicker(2 * time.Minute)
 		go func() {
 			for range ticker.C {
 				fmt.Println("[CACHE AUTO-REFRESH] Performing scheduled cache refresh")
-				
+
 				service.cacheMutex.Lock()
 				service.cache.Delete("recent_events")
 				service.cacheMutex.Unlock()
-				
+
 				if _, err := service.cacheRecentEvents(); err != nil {
 					fmt.Println("[CACHE AUTO-REFRESH ERROR] Failed to refresh cache:", err)
 				}
 			}
 		}()
 	}()
-	
+
 	return service
 }
 
@@ -115,7 +115,7 @@ func (s *EventService) CreateEvent(input CreateEventInput, image *multipart.File
 	newEvent := models.Event{
 		Name:        input.Name,
 		Description: input.Description,
-		CategoryID:  input.CategoryID, 
+		CategoryID:  input.CategoryID,
 		EventDate:   eventDate,
 		Venue:       input.Venue,
 		Price:       input.Price,
@@ -166,28 +166,28 @@ func (s *EventService) GetAllEvents(page, pageSize int, categoryID uint) (*Pagin
 
 func (s *EventService) GetEventByID(id uint) (*EventResponse, error) {
 	cacheKey := fmt.Sprintf("event_%d", id)
-	
+
 	s.cacheMutex.RLock()
 	cachedData, found := s.cache.Get(cacheKey)
 	s.cacheMutex.RUnlock()
-	
+
 	if found {
 		if eventData, ok := cachedData.(*EventResponse); ok {
 			return eventData, nil
 		}
 	}
-	
+
 	eventData, err := s.EventRepo.GetEventByID(id)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	result := s.mapEventToResponse(*eventData)
-	
+
 	s.cacheMutex.Lock()
 	s.cache.Set(cacheKey, result, 5*time.Minute)
 	s.cacheMutex.Unlock()
-	
+
 	return result, nil
 }
 
@@ -229,16 +229,16 @@ func (s *EventService) UpdateEvent(id uint, input UpdateEventInput, image *multi
 	if err != nil {
 		return nil, err
 	}
-	
+
 	eventResp := s.mapEventToResponse(*freshEvent)
-	
+
 	cacheKey := fmt.Sprintf("event_%d", id)
 	s.cacheMutex.Lock()
 	s.cache.Delete(cacheKey)
 	s.cache.Set(cacheKey, eventResp, 5*time.Minute)
 	s.cache.Delete("recent_events")
 	s.cacheMutex.Unlock()
-	
+
 	go func() {
 		fmt.Println("[CACHE TRIGGER] Event updated, refreshing cache")
 		s.cacheRecentEvents()
@@ -259,25 +259,11 @@ func (s *EventService) SearchEvents(query string, page, pageSize int) (*Paginate
 }
 
 func (s *EventService) GetAllCategories() ([]models.Category, error) {
-	s.cacheMutex.RLock()
-	cachedCategories, found := s.cache.Get("all_categories")
-	s.cacheMutex.RUnlock()
-	
-	if found {
-		if categories, ok := cachedCategories.([]models.Category); ok {
-			return categories, nil
-		}
-	}
-	
+
 	categories, err := s.EventRepo.GetAllCategories()
 	if err != nil {
 		return nil, err
 	}
-	
-	s.cacheMutex.Lock()
-	s.cache.Set("all_categories", categories, 15*time.Minute)
-	s.cacheMutex.Unlock()
-	
 	return categories, nil
 }
 
@@ -316,7 +302,7 @@ func (s *EventService) DeleteCategory(id uint) error {
 		return fmt.Errorf("failed to fetch events for category: %w", err)
 	}
 
-	fmt.Printf("Deleting category %s (ID: %d) with %d associated events\n", 
+	fmt.Printf("Deleting category %s (ID: %d) with %d associated events\n",
 		cat.Name, cat.ID, len(eventsToDelete))
 
 	for _, evt := range eventsToDelete {
@@ -361,7 +347,7 @@ func (s *EventService) createPaginatedResponse(events []models.Event, total int6
 	return &PaginatedEvents{
 		Events:     eventResponses,
 		Total:      total,
-		Page:       page, 
+		Page:       page,
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	}, nil
@@ -379,7 +365,7 @@ func (s *EventService) processTags(event *models.Event, tagNames []string) error
 		if name == "" {
 			continue
 		}
-		
+
 		tag, err := s.EventRepo.FindOrCreateTag(name)
 		if err != nil {
 			continue
@@ -445,7 +431,7 @@ func (s *EventService) mapEventToResponse(event models.Event) *EventResponse {
 		tags = make([]models.Tag, len(event.Tags))
 		copy(tags, event.Tags)
 	}
-	
+
 	return &EventResponse{
 		ID:          event.ID,
 		Name:        event.Name,
@@ -470,25 +456,25 @@ func (s *EventService) DeleteEvent(id uint) error {
 	if err := s.BookingRepo.DeleteBookingsByEvent(id); err != nil {
 		return fmt.Errorf("failed to delete associated bookings: %w", err)
 	}
-	
+
 	if evt.ImageURL != "" {
 		_ = s.StorageService.DeleteFile(evt.ImageURL)
 	}
 
 	err = s.EventRepo.Delete(id)
-	
+
 	if err == nil {
 		s.cacheMutex.Lock()
 		s.cache.Delete(fmt.Sprintf("event_%d", id))
 		s.cache.Delete("recent_events")
 		s.cacheMutex.Unlock()
-		
+
 		go func() {
 			fmt.Println("[CACHE TRIGGER] Event deleted, refreshing cache")
 			s.cacheRecentEvents()
 		}()
 	}
-	
+
 	return err
 }
 
@@ -496,29 +482,29 @@ func (s *EventService) GetRecentEvents() (*PaginatedEvents, error) {
 	s.cacheMutex.RLock()
 	cachedStuff, found := s.cache.Get("recent_events")
 	s.cacheMutex.RUnlock()
-	
-	shouldForceRefresh := found && 
+
+	shouldForceRefresh := found &&
 		(len(os.Getenv("FORCE_CACHE_REFRESH")) > 0 || len(os.Getenv("DEBUG")) > 0)
-	
+
 	if found && !shouldForceRefresh {
 		if events, ok := cachedStuff.(*PaginatedEvents); ok {
 			fmt.Println("[CACHE HIT] Serving recent events from cache")
 			return events, nil
 		}
 	}
-	
+
 	if !found {
 		fmt.Println("[CACHE MISS] Recent events not found in cache, refreshing...")
 	} else {
 		fmt.Println("[CACHE REFRESH] Forcing cache refresh")
 	}
-	
+
 	return s.cacheRecentEvents()
 }
 
 func (s *EventService) cacheRecentEvents() (*PaginatedEvents, error) {
 	fmt.Println("[CACHE UPDATE] Starting recent events cache refresh")
-	
+
 	s.cacheMutex.Lock()
 	defer s.cacheMutex.Unlock()
 
@@ -529,9 +515,9 @@ func (s *EventService) cacheRecentEvents() (*PaginatedEvents, error) {
 	}
 
 	fmt.Println("[CACHE REFRESH] Getting fresh events from database")
-	
+
 	var topEvents []models.Event
-	
+
 	if len(evts) > 5 {
 		topEvents = evts[:5]
 	} else {

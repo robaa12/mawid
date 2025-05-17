@@ -76,7 +76,7 @@ func (h *EventHandler) CreateEvent(c *gin.Context) {
 func (h *EventHandler) GetEvents(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-	
+
 	// Get category filter if provided
 	categoryIDStr := c.Query("category_id")
 	var categoryID uint
@@ -188,8 +188,6 @@ func (h *EventHandler) SearchEvents(c *gin.Context) {
 	utils.SuccessResponse(c, http.StatusOK, "Search results", events)
 }
 
-// GetRecentEvents returns the 5 most recent events, prioritizing upcoming events
-// Uses server-side caching for better performance
 func (h *EventHandler) GetRecentEvents(c *gin.Context) {
 	events, err := h.EventService.GetRecentEvents()
 	if err != nil {

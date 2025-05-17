@@ -1,6 +1,7 @@
 package middlewars
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -56,7 +57,9 @@ func AdminMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		if role != models.RoleAdmin {
+		// Convert role to string for reliable comparison
+		roleStr := fmt.Sprintf("%v", role)
+		if roleStr != string(models.RoleAdmin) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "Admin access required"})
 			c.Abort()
