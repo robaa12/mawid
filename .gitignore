@@ -13,7 +13,7 @@
 *.temp
 
 # Docker
-docker-compose.yaml
+docker-compose.yml
 Database-data/
 
 # Backend
